@@ -2,11 +2,25 @@
 
 ## Project status / scope lock
 
-Phase 1, Step 1 (Greenhouse adapter) is the ONLY implemented step.
+Phase 1, Steps 1–2 (Greenhouse + Lever adapters) are the ONLY implemented
+steps. Greenhouse is FROZEN; do not modify it without reporting a genuine
+shared-infrastructure defect first.
 
-Do not implement: Lever, Adzuna, SearchApi, career-page extraction,
-deduplication, embeddings/semantics, ranking, resume tailoring, ATS scoring,
-auth, frontend, queues/brokers. Phase order is locked; see README roadmap.
+Do not implement: Adzuna, SearchApi, career-page extraction, deduplication,
+embeddings/semantics, ranking, resume tailoring, ATS scoring, auth, frontend,
+queues/brokers. Phase order is locked; see README roadmap.
+
+## Lever specifics
+
+- Public Postings API ONLY (`GET /v0/postings/{site}?mode=json`); the
+  authenticated Data API (`/v1`) is deliberately unused.
+- Bare-array envelope; `{"data": ...}` (v1 shape) must be rejected as invalid.
+- Offset pagination: stop on short/empty page, hard ceiling `lever_max_pages`,
+  duplicate-id suppression across pages, `skip += len(page)`.
+- `createdAt` is undocumented-but-observed epoch ms: parse defensively,
+  treat as optional. No updated-at field exists → `source_updated_at` stays None.
+- Lever `lists` are preserved verbatim in `extra`; NEVER promote them into
+  requirements/responsibilities (Phase 2 owns semantic JD extraction).
 
 ## Commands
 
@@ -42,7 +56,8 @@ Opt-in extras:
 - Logging via stdlib; contextual `key=value` fragments; NEVER log secrets or credentials.
 - Config only through `app/config/settings.py` + `.env` (see `.env.example`). No hardcoded secrets. `.env` is gitignored.
 - Tests: behavior-focused, MockTransport-based, deterministic timing via injected fakes; fixtures under `tests/fixtures/greenhouse/`.
-- Board tokens must match `^[A-Za-z0-9_-]{1,64}$` before URL construction.
+- Board tokens must match `^[A-Za-z0-9_-]{1,64}$` before URL construction
+  (Greenhouse board tokens and Lever site names alike).
 
 ## Definition of done (per step)
 

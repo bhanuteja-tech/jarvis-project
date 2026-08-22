@@ -1,0 +1,48 @@
+[
+  {
+    "id": "5ac21346-8e0c-4494-8e7a-3eb92ff77901",
+    "text": "Senior Platform Engineer",
+    "createdAt": 1553186035299,
+    "categories": {
+      "location": "Arlington, TX",
+      "commitment": "Regular Full Time (Salary)",
+      "team": "Professional Services",
+      "department": "Customer Success",
+      "allLocations": ["Arlington, TX"]
+    },
+    "country": "US",
+    "description": "<p>We are hiring a Senior Platform Engineer.</p><p>What you will do: build core services.</p>",
+    "descriptionPlain": "We are hiring a Senior Platform Engineer. What you will do: build core services.",
+    "hostedUrl": "https://jobs.lever.co/examplecorp/5ac21346-8e0c-4494-8e7a-3eb92ff77901",
+    "applyUrl": "https://jobs.lever.co/examplecorp/5ac21346-8e0c-4494-8e7a-3eb92ff77901/apply",
+    "workplaceType": "hybrid",
+    "salaryRange": {
+      "currency": "USD",
+      "interval": "yearly",
+      "min": 120000,
+      "max": 160000
+    },
+    "salaryDescriptionPlain": "Base salary band for the role.",
+    "lists": [
+      {
+        "text": "Requirements",
+        "content": "<ul><li>5+ years backend experience</li></ul>"
+      },
+      {
+        "text": "Benefits",
+        "content": "<ul><li>Health insurance</li></ul>"
+      }
+    ]
+  },
+  {
+    "id": "5ac21346-8e0c-4494-8e7a-3eb92ff77902",
+    "text": "Product Designer",
+    "createdAt": 1700000000000,
+    "categories": {
+      "location": "Remote — EU",
+      "commitment": "Contract"
+    },
+    "hostedUrl": "https://jobs.lever.co/examplecorp/5ac21346-8e0c-4494-8e7a-3eb92ff77902",
+    "applyUrl": "https://jobs.lever.co/examplecorp/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply"
+  }
+]

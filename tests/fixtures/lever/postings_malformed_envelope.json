@@ -1,0 +1,12 @@
+{
+  "data": [
+    {
+      "id": "11111111-2222-3333-4444-555555555555",
+      "text": "Data API Shaped Posting",
+      "hostedUrl": "https://jobs.lever.co/examplecorp/11111111-2222-3333-4444-555555555555",
+      "applyUrl": "https://jobs.lever.co/examplecorp/11111111-2222-3333-4444-555555555555/apply"
+    }
+  ],
+  "next": "0.1414895548650.a6070140",
+  "hasNext": true
+}

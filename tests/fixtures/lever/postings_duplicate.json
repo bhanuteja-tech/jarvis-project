@@ -1,0 +1,14 @@
+[
+  {
+    "id": "bbbbbbbb-0000-0000-0000-000000000002",
+    "text": "Duplicate Of Earlier Page",
+    "hostedUrl": "https://jobs.lever.co/examplecorp/bbbbbbbb-0000-0000-0000-000000000002",
+    "applyUrl": "https://jobs.lever.co/examplecorp/bbbbbbbb-0000-0000-0000-000000000002/apply"
+  },
+  {
+    "id": "bbbbbbbb-0000-0000-0000-000000000006",
+    "text": "Genuinely New After Shift",
+    "hostedUrl": "https://jobs.lever.co/examplecorp/bbbbbbbb-0000-0000-0000-000000000006",
+    "applyUrl": "https://jobs.lever.co/examplecorp/bbbbbbbb-0000-0000-0000-000000000006/apply"
+  }
+]

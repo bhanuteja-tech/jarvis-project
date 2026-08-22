@@ -16,6 +16,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 DEFAULT_GREENHOUSE_BASE_URL = "https://boards-api.greenhouse.io/v1/boards"
+DEFAULT_LEVER_BASE_URL = "https://api.lever.co/v0/postings"
 
 
 class Settings(BaseSettings):
@@ -36,6 +37,13 @@ class Settings(BaseSettings):
     greenhouse_max_retries: int = Field(default=3, ge=0, le=10)
     greenhouse_board_registry_path: Path | None = None
 
+    lever_base_url: str = DEFAULT_LEVER_BASE_URL
+    lever_timeout_seconds: float = Field(default=30.0, gt=0)
+    lever_max_retries: int = Field(default=3, ge=0, le=10)
+    lever_page_size: int = Field(default=50, ge=1, le=100)
+    lever_max_pages: int = Field(default=200, ge=1)
+    lever_site_registry_path: Path | None = None
+
     log_level: str = "INFO"
 
     @field_validator("log_level")
@@ -47,12 +55,12 @@ class Settings(BaseSettings):
             raise ValueError(f"log_level must be one of {sorted(allowed)}")
         return normalized
 
-    @field_validator("greenhouse_base_url")
+    @field_validator("greenhouse_base_url", "lever_base_url")
     @classmethod
-    def _validate_greenhouse_base_url(cls, value: str) -> str:
+    def _validate_source_base_url(cls, value: str) -> str:
         stripped = value.rstrip("/")
         if not stripped.startswith("https://"):
-            raise ValueError("greenhouse_base_url must use https")
+            raise ValueError("source base urls must use https")
         return stripped
 
 

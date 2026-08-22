@@ -1,0 +1,14 @@
+[
+  {
+    "id": "bbbbbbbb-0000-0000-0000-000000000003",
+    "text": "Pagination Role Three",
+    "hostedUrl": "https://jobs.lever.co/examplecorp/bbbbbbbb-0000-0000-0000-000000000003",
+    "applyUrl": "https://jobs.lever.co/examplecorp/bbbbbbbb-0000-0000-0000-000000000003/apply"
+  },
+  {
+    "id": "bbbbbbbb-0000-0000-0000-000000000004",
+    "text": "Pagination Role Four",
+    "hostedUrl": "https://jobs.lever.co/examplecorp/bbbbbbbb-0000-0000-0000-000000000004",
+    "applyUrl": "https://jobs.lever.co/examplecorp/bbbbbbbb-0000-0000-0000-000000000004/apply"
+  }
+]

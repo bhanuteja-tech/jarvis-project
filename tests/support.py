@@ -16,12 +16,20 @@ import httpx
 
 from app.config.settings import Settings
 from app.sources.greenhouse.client import GreenhouseClient
+from app.sources.lever.client import LeverClient
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "greenhouse"
+LEVER_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "lever"
 
 BASE_URL = "https://boards-api.greenhouse.io/v1/boards"
+LEVER_BASE_URL = "https://api.lever.co/v0/postings"
 
 TOKEN = "example_corp"
+SITE = "examplecorp"
+
+
+def load_lever_fixture(name: str) -> Any:
+    return json.loads((LEVER_FIXTURES_DIR / name).read_text(encoding="utf-8"))
 
 
 def load_fixture_text(name: str) -> str:
@@ -39,8 +47,11 @@ def make_settings(**overrides: Any) -> Settings:
     values: dict[str, Any] = {
         "database_url": "postgresql+psycopg://user:secret@localhost:5432/jarvis",
         "greenhouse_base_url": BASE_URL,
+        "lever_base_url": LEVER_BASE_URL,
         "greenhouse_timeout_seconds": 30.0,
+        "lever_timeout_seconds": 30.0,
         "greenhouse_max_retries": 3,
+        "lever_max_retries": 3,
         "log_level": "WARNING",
     }
     values.update(overrides)
@@ -119,6 +130,22 @@ def make_client(
 ) -> GreenhouseClient:
     settings = make_settings(**settings_overrides)
     return GreenhouseClient(
+        settings,
+        transport=httpx.MockTransport(router),
+        sleep=sleeper.sleep if sleeper is not None else None,
+        jitter_rng=jitter,
+    )
+
+
+def make_lever_client(
+    router: ScriptedRouter,
+    *,
+    sleeper: FakeSleeper | None = None,
+    jitter: Callable[[float], float] | None = None,
+    **settings_overrides: Any,
+) -> LeverClient:
+    settings = make_settings(**settings_overrides)
+    return LeverClient(
         settings,
         transport=httpx.MockTransport(router),
         sleep=sleeper.sleep if sleeper is not None else None,
