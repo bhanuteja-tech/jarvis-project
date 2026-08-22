@@ -13,9 +13,17 @@ evidence; optional semantic stage behind the `JdLlmClient` protocol
 (disabled by default; claims must quote verbatim evidence or they are
 rejected). No provider integrations exist yet.
 
-Next phases (3+): Candidate/Resume Intelligence, Matching,
-Resume Tailoring, Truth/ATS Validation, Product Integration.
-Adzuna was intentionally excluded from Phase 1.
+Phase 3 (Candidate / Resume Intelligence) is IMPLEMENTED:
+`app/candidate` — plain-text/structured resume → CandidateProfile with
+PII-quarantined contact, taxonomy skills, explicit-date experience
+(injectable `now`; total_years only at ≥80% duration coverage), education,
+certifications, projects, explicit-statement preferences. No persistence,
+no PDF/OCR, no LLM. Parallel graph branch: START →
+build_candidate_profile → END; absent `candidate_input` ⇒ silent SKIPPED.
+
+Next phases (4+): Matching, Resume Tailoring, Truth/ATS Validation,
+Product Integration. Matching will consume `candidate_profile` ×
+`jd_analyses`. Adzuna was intentionally excluded from Phase 1.
 
 ## JD understanding specifics
 

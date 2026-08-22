@@ -79,6 +79,14 @@ class Settings(BaseSettings):
     #: implementing the JdLlmClient protocol to be supplied by wiring.
     jd_llm_enabled: bool = False
 
+    # --- Phase 3: Candidate / resume intelligence ---------------------------
+    #: Hard cap for a single resume's analyzed text (no truncation: oversize
+    #: inputs FAIL with max_chars_violation).
+    candidate_max_chars: int = Field(default=30_000, ge=1_000)
+    #: When True, quarantined contact/PII values are stripped from the built
+    #: profile after construction; ``redacted`` is set on the profile.
+    candidate_redact_pii: bool = False
+
     log_level: str = "INFO"
 
     @field_validator("log_level")

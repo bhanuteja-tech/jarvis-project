@@ -46,6 +46,10 @@ class GraphState(TypedDict, total=False):
     # Phase 2 (additive): per-job JD analyses + analysis failure records.
     jd_analyses: list[dict[str, Any]]
     analysis_errors: list[dict[str, Any]]
+    # Phase 3 (additive): candidate branch. `candidate_input` is user-supplied
+    # ({text} | {structured}); `candidate_profile` is the built CandidateResult.
+    candidate_input: dict[str, Any]
+    candidate_profile: dict[str, Any]
 
 
 __all__ = ["ErrorRecord", "GraphState", "WarningRecord"]
