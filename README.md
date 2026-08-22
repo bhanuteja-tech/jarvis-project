@@ -2,8 +2,9 @@
 
 Production-oriented AI Job Discovery and Resume Tailoring System.
 
-**Current status: Phase 3 COMPLETE — Candidate / Resume Intelligence added
-on top of the frozen pipeline (Phase 1 Steps 1–6 · Phase 2 JD Understanding).**
+**Current status: Phase 4 COMPLETE — Candidate ↔ Job Matching added on top
+of the frozen pipeline (Phases 1–3: discovery · JD understanding ·
+candidate profiling).**
 
 ## Stack
 

@@ -26,6 +26,7 @@ from app.candidate.analyzer import ResumeAnalyzer
 from app.dedup.cluster import dedupe_jobs
 from app.graph.state import ErrorRecord, GraphState, WarningRecord
 from app.jdunderstanding.analyzer import build_analyzer
+from app.matching.service import match_jobs
 from app.ranking.service import rank_jobs
 from app.sources.base import SourceAdapter
 from app.sources.errors import SourceError
@@ -37,6 +38,7 @@ CANDIDATE_NODE = "build_candidate_profile"
 DEDUP_NODE = "deduplicate_jobs"
 RANK_NODE = "rank_jobs"
 JD_NODE = "analyze_jd"
+MATCHING_NODE = "match_candidate_to_jobs"
 
 
 def _error_record_from_exception(adapter: SourceAdapter, exc: BaseException) -> ErrorRecord:
@@ -271,8 +273,73 @@ async def _build_candidate_profile(state: GraphState) -> dict:
     return {"candidate_profile": result.model_dump()}
 
 
+async def _match_candidate_to_jobs(state: GraphState) -> dict:
+    """Fail-open Phase-4 candidate<->job matching over all deduplicated jobs."""
+    candidate_result = state.get("candidate_profile")
+    if not isinstance(candidate_result, dict) or not candidate_result:
+        warnings = list(state.get("warnings") or [])
+        warnings.append(
+            WarningRecord(
+                source="matching",
+                code="matching_skipped_no_candidate",
+                message="no usable candidate profile; matching skipped",
+            )
+        )
+        return {"warnings": warnings}
+    if str(candidate_result.get("status", "")).lower() in {"skipped", "failed"}:
+        warnings = list(state.get("warnings") or [])
+        warnings.append(
+            WarningRecord(
+                source="matching",
+                code="matching_skipped_no_candidate",
+                message=(
+                    "candidate profile unusable "
+                    f"(status={candidate_result.get('status')}); matching skipped"
+                ),
+            )
+        )
+        return {"warnings": warnings}
+
+    jobs = state.get("jobs") or []
+    ranked = state.get("ranked_jobs") or []
+    jd_analyses = state.get("jd_analyses") or []
+    try:
+        outcome = match_jobs(candidate_result, jobs, ranked, jd_analyses)
+    except Exception as exc:  # noqa: BLE001 - fail-open contract
+        logger.exception(
+            "matching failed; all prior state preserved",
+            extra={"source": "matching", "operation": "match_jobs"},
+        )
+        error = ErrorRecord(
+            source="matching",
+            kind=type(exc).__name__,
+            retryable=False,
+            message=f"unexpected matching failure; state preserved: {exc}",
+            endpoint=None,
+            attempts=0,
+            status_code=None,
+        )
+        warnings = list(state.get("warnings") or [])
+        warnings.append(
+            WarningRecord(
+                source="matching",
+                code="matching_failed",
+                message=f"matching failed ({exc})",
+            )
+        )
+        return {
+            "errors": [*(state.get("errors") or []), error],
+            "warnings": warnings,
+        }
+
+    return {
+        "match_results": [m.to_dict() for m in outcome.match_results],
+        "matching_summary": outcome.summary.to_dict(),
+    }
+
+
 def build_workflow(adapters: Sequence[SourceAdapter]):
-    """Compile the Phase-1/2/3 discovery graph around the given adapters."""
+    """Compile the Phase-1/2/3/4 discovery graph around the given adapters."""
     fetch_sources = _make_fetch_sources_node(adapters)
 
     builder = StateGraph(GraphState)
@@ -281,12 +348,14 @@ def build_workflow(adapters: Sequence[SourceAdapter]):
     builder.add_node(DEDUP_NODE, _deduplicate_jobs)
     builder.add_node(RANK_NODE, _rank_jobs)
     builder.add_node(JD_NODE, _analyze_jd)
+    builder.add_node(MATCHING_NODE, _match_candidate_to_jobs)
     builder.add_edge(START, FETCH_SOURCES_NODE)
     builder.add_edge(START, CANDIDATE_NODE)
     builder.add_edge(FETCH_SOURCES_NODE, DEDUP_NODE)
     builder.add_edge(DEDUP_NODE, RANK_NODE)
     builder.add_edge(RANK_NODE, JD_NODE)
-    builder.add_edge(JD_NODE, END)
+    builder.add_edge(JD_NODE, MATCHING_NODE)
+    builder.add_edge(MATCHING_NODE, END)
     # Independent parallel candidate branch (Phase 3).
     builder.add_edge(CANDIDATE_NODE, END)
     return builder.compile()
@@ -297,6 +366,7 @@ __all__ = [
     "DEDUP_NODE",
     "FETCH_SOURCES_NODE",
     "JD_NODE",
+    "MATCHING_NODE",
     "RANK_NODE",
     "build_workflow",
 ]

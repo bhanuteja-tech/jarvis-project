@@ -50,6 +50,10 @@ class GraphState(TypedDict, total=False):
     # ({text} | {structured}); `candidate_profile` is the built CandidateResult.
     candidate_input: dict[str, Any]
     candidate_profile: dict[str, Any]
+    # Phase 4 (additive): per-job match wrappers reference jobs by index;
+    # `jobs` / `ranked_jobs` are never reordered by matching.
+    match_results: list[dict[str, Any]]
+    matching_summary: dict[str, Any]
 
 
 __all__ = ["ErrorRecord", "GraphState", "WarningRecord"]

@@ -21,9 +21,17 @@ certifications, projects, explicit-statement preferences. No persistence,
 no PDF/OCR, no LLM. Parallel graph branch: START →
 build_candidate_profile → END; absent `candidate_input` ⇒ silent SKIPPED.
 
-Next phases (4+): Matching, Resume Tailoring, Truth/ATS Validation,
-Product Integration. Matching will consume `candidate_profile` ×
-`jd_analyses`. Adzuna was intentionally excluded from Phase 1.
+Phase 4 (Candidate ↔ Job Matching) is IMPLEMENTED: `app/matching` —
+soft-only deterministic scoring (no hard filters), fixed weights
+(required 30 / preferred 10 / experience 20 / location 12 / employment 10 /
+education 8 / level 5 / salary 5), tiers strong≥75 moderate≥50,
+`jd_analysis_missing` fallback gap, neutral partials for missing data,
+deterministic tie-breaks. Fail-open `match_candidate_to_jobs` node after
+JD analysis; `match_results`/`matching_summary` additive state keys.
+
+Next phases (5+): Resume Tailoring, Truth/ATS Validation, Product
+Integration. Matching consumes `candidate_profile` × `jd_analyses`.
+Adzuna was intentionally excluded from Phase 1.
 
 ## JD understanding specifics
 
