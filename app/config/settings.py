@@ -54,6 +54,22 @@ class Settings(BaseSettings):
     searchapi_max_retries: int = Field(default=2, ge=0, le=10)
     searchapi_max_pages: int = Field(default=5, ge=1, le=50)
 
+    career_fetch_timeout_seconds: float = Field(default=20.0, gt=0)
+    career_max_attempts: int = Field(default=2, ge=1, le=10)
+    career_max_bytes: int = Field(default=2_000_000, ge=10_000)
+    career_max_redirects: int = Field(default=5, ge=0, le=10)
+    #: Correction #2: HTTP is REJECTED by default; only HTTPS is fetched.
+    #: Enabling this flag permits plain HTTP for controlled environments.
+    career_allow_http: bool = False
+    #: Correction #3: when robots.txt is unavailable/unreachable, `strict`
+    #: (default) rejects the fetch; `permissive` proceeds with a warning.
+    career_robots_permissive: bool = False
+    career_robots_timeout_seconds: float = Field(default=5.0, gt=0)
+    career_politeness_seconds: float = Field(default=2.0, ge=0)
+    #: Layer-4 browser rendering stays OFF unless explicitly enabled AND the
+    #: optional `playwright` extra is installed.
+    career_browser_enabled: bool = False
+
     log_level: str = "INFO"
 
     @field_validator("log_level")

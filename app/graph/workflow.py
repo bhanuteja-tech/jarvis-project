@@ -1,9 +1,14 @@
-"""Minimal LangGraph orchestration foundation (Phase 1, Step 1).
+"""Minimal LangGraph orchestration foundation.
 
-One node: `fetch_sources`. It iterates registered source adapters through
-the shared `SourceAdapter` contract, merges canonical results into state,
-and converts failures into structured error records. It never raises across
-the graph boundary and never silently drops a failure.
+Nodes:
+- `fetch_sources`: iterates registered source adapters through the shared
+  `SourceAdapter` contract, merges canonical results into state, and converts
+  failures into structured error records. It never raises across the graph
+  boundary and never silently drops a failure.
+- `deduplicate_jobs` (Phase 1 Step 5): fail-open in-memory cross-source
+  clustering over `state.jobs`. On any unexpected exception the original
+  unmerged jobs pass through untouched and a non-retryable error record is
+  appended — deduplication can never turn jobs into an empty result.
 
 Deliberately absent: LLM calls, agents, conditional routing, persistence
 nodes. These arrive with later steps/phases.
@@ -16,13 +21,17 @@ from collections.abc import Sequence
 
 from langgraph.graph import END, START, StateGraph
 
+from app.dedup.cluster import dedupe_jobs
 from app.graph.state import ErrorRecord, GraphState, WarningRecord
+from app.ranking.service import rank_jobs
 from app.sources.base import SourceAdapter
 from app.sources.errors import SourceError
 
 logger = logging.getLogger(__name__)
 
 FETCH_SOURCES_NODE = "fetch_sources"
+DEDUP_NODE = "deduplicate_jobs"
+RANK_NODE = "rank_jobs"
 
 
 def _error_record_from_exception(adapter: SourceAdapter, exc: BaseException) -> ErrorRecord:
@@ -98,15 +107,100 @@ def _make_fetch_sources_node(adapters: Sequence[SourceAdapter]):
     return fetch_sources
 
 
+async def _deduplicate_jobs(state: GraphState) -> dict:
+    """Fail-open cross-source clustering (Step 5)."""
+    jobs = state.get("jobs") or []
+    try:
+        outcome = dedupe_jobs(jobs)
+    except Exception as exc:  # noqa: BLE001 - fail-open contract
+        logger.exception(
+            "dedup failed; passing original jobs through unmerged",
+            extra={"source": "dedup", "operation": "deduplicate_jobs"},
+        )
+        error = ErrorRecord(
+            source="dedup",
+            kind=type(exc).__name__,
+            retryable=False,
+            message=f"unexpected dedup failure; original jobs preserved: {exc}",
+            endpoint=None,
+            attempts=0,
+            status_code=None,
+        )
+        warnings = list(state.get("warnings") or [])
+        warnings.append(
+            WarningRecord(
+                source="dedup",
+                code="dedup_failed",
+                message=f"dedup failed; jobs passed through unmerged ({exc})",
+            )
+        )
+        return {
+            "errors": [*(state.get("errors") or []), error],
+            "warnings": warnings,
+        }
+
+    new_warnings = [
+        WarningRecord(source="dedup", code=item["code"], message=item["message"])
+        for item in outcome.warnings
+    ]
+    return {
+        "jobs": outcome.jobs,
+        "warnings": [*(state.get("warnings") or []), *new_warnings],
+    }
+
+
+async def _rank_jobs(state: GraphState) -> dict:
+    """Fail-open deterministic ranking (Step 6)."""
+    jobs = state.get("jobs") or []
+    preferences_raw = (state.get("search_preferences") or {}).get("ranking")
+    try:
+        outcome = rank_jobs(jobs, preferences_raw)
+    except Exception as exc:  # noqa: BLE001 - fail-open contract
+        logger.exception(
+            "ranking failed; jobs preserved unranked",
+            extra={"source": "ranking", "operation": "rank_jobs"},
+        )
+        error = ErrorRecord(
+            source="ranking",
+            kind=type(exc).__name__,
+            retryable=False,
+            message=f"unexpected ranking failure; jobs preserved: {exc}",
+            endpoint=None,
+            attempts=0,
+            status_code=None,
+        )
+        warnings = list(state.get("warnings") or [])
+        warnings.append(
+            WarningRecord(
+                source="ranking",
+                code="ranking_failed",
+                message=f"ranking failed; treat jobs as unranked ({exc})",
+            )
+        )
+        return {
+            "errors": [*(state.get("errors") or []), error],
+            "warnings": warnings,
+        }
+
+    return {
+        "ranked_jobs": [ranked.to_dict() for ranked in outcome.ranked_jobs],
+        "ranking_summary": outcome.summary.to_dict(),
+    }
+
+
 def build_workflow(adapters: Sequence[SourceAdapter]):
     """Compile the Phase-1 discovery graph around the given adapters."""
     fetch_sources = _make_fetch_sources_node(adapters)
 
     builder = StateGraph(GraphState)
     builder.add_node(FETCH_SOURCES_NODE, fetch_sources)
+    builder.add_node(DEDUP_NODE, _deduplicate_jobs)
+    builder.add_node(RANK_NODE, _rank_jobs)
     builder.add_edge(START, FETCH_SOURCES_NODE)
-    builder.add_edge(FETCH_SOURCES_NODE, END)
+    builder.add_edge(FETCH_SOURCES_NODE, DEDUP_NODE)
+    builder.add_edge(DEDUP_NODE, RANK_NODE)
+    builder.add_edge(RANK_NODE, END)
     return builder.compile()
 
 
-__all__ = ["FETCH_SOURCES_NODE", "build_workflow"]
+__all__ = ["DEDUP_NODE", "FETCH_SOURCES_NODE", "RANK_NODE", "build_workflow"]

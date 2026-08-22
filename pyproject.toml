@@ -17,6 +17,7 @@ dependencies = [
     "sqlalchemy>=2.0.31",
     "psycopg[binary]>=3.1",
     "alembic>=1.13",
+    "beautifulsoup4>=4.12",
 ]
 
 [project.optional-dependencies]
@@ -24,6 +25,12 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.23",
     "ruff>=0.6",
+]
+# Optional Layer-4 rendering support (large download; never required for the
+# default test suite). Browser binaries are installed separately via
+# `playwright install chromium`.
+browser = [
+    "playwright>=1.45",
 ]
 
 [tool.setuptools.packages.find]

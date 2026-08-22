@@ -2,13 +2,24 @@
 
 ## Project status / scope lock
 
-Phase 1, Steps 1–3 (Greenhouse + Lever + SearchApi adapters) are the ONLY
-implemented steps. Greenhouse and Lever are FROZEN; do not modify them
-without reporting a genuine shared-infrastructure defect first.
+Phase 1 is COMPLETE and FROZEN (Steps 1–6):
+Greenhouse · Lever · SearchApi · Career Page Extractor · Deduplication ·
+Relevance & Ranking. Do not modify any of these without reporting a genuine
+shared-infrastructure defect first.
 
-Do not implement: Adzuna, career-page extraction, cross-source deduplication,
-embeddings/semantics, ranking, resume tailoring, ATS scoring, auth, frontend,
-queues/brokers. Phase order is locked; see README roadmap.
+Next phases (2+): JD Intelligence, Candidate Intelligence, Matching,
+Resume Tailoring, Truth/ATS Validation, Product Integration.
+Adzuna was intentionally excluded from Phase 1.
+
+## Ranking specifics
+
+- Deterministic, explainable, stdlib-only (`app/ranking`); no LLM/embeddings.
+- Hard requirements eliminate; soft preferences only affect score. Missing
+  job data NEVER triggers hard rejection — evidence gaps are recorded.
+- Freshness uses `source_created_at` ONLY; missing ⇒ neutral score labeled
+  `posting_date_unavailable`. Never manufacture timestamps from display text.
+- Ranked output wrappers reference jobs by index; the canonical `jobs` list
+  is never reordered or mutated by the ranking node.
 
 ## Lever specifics
 

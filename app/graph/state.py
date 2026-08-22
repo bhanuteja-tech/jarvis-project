@@ -39,6 +39,10 @@ class GraphState(TypedDict, total=False):
     jobs: list[dict[str, Any]]
     errors: list[ErrorRecord]
     warnings: list[WarningRecord]
+    # Phase 1 Step 6 (additive): ranking output wrappers reference jobs by
+    # index; the canonical `jobs` list itself is never reordered or modified.
+    ranked_jobs: list[dict[str, Any]]
+    ranking_summary: dict[str, Any]
 
 
 __all__ = ["ErrorRecord", "GraphState", "WarningRecord"]

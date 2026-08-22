@@ -22,6 +22,7 @@ from app.sources.searchapi.client import SearchApiClient
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "greenhouse"
 LEVER_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "lever"
 SEARCHAPI_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "searchapi"
+CAREER_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "career"
 
 BASE_URL = "https://boards-api.greenhouse.io/v1/boards"
 LEVER_BASE_URL = "https://api.lever.co/v0/postings"
@@ -29,6 +30,31 @@ SEARCHAPI_SEARCH_URL = "https://www.searchapi.io/api/v1/search"
 
 TOKEN = "example_corp"
 SITE = "examplecorp"
+
+
+def load_career_fixture_text(name: str) -> str:
+    return (CAREER_FIXTURES_DIR / name).read_text(encoding="utf-8")
+
+
+def fake_resolver(mapping: dict[str, list[str]] | None = None) -> Callable[[str], Any]:
+    """Deterministic offline DNS resolver; unknown hosts resolve public."""
+    table = {host.lower(): ips for host, ips in (mapping or {}).items()}
+
+    async def _resolve(host: str) -> list[str]:
+        return list(table.get(host.lower(), ["93.184.216.34"]))
+
+    return _resolve
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.value = 0.0
+
+    def __call__(self) -> float:
+        return self.value
+
+    def advance(self, seconds: float) -> None:
+        self.value += seconds
 
 
 def load_lever_fixture(name: str) -> Any:
@@ -63,6 +89,7 @@ def make_settings(**overrides: Any) -> Settings:
         "greenhouse_max_retries": 3,
         "lever_max_retries": 3,
         "searchapi_max_retries": 2,
+        "career_politeness_seconds": 0.0,
         "log_level": "WARNING",
     }
     values.update(overrides)
@@ -177,6 +204,48 @@ def make_searchapi_client(
         transport=httpx.MockTransport(router),
         sleep=sleeper.sleep if sleeper is not None else None,
         jitter_rng=jitter,
+    )
+
+
+def html_response(
+    body: str,
+    status_code: int = 200,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    return httpx.Response(
+        status_code,
+        content=body.encode("utf-8"),
+        headers={"Content-Type": "text/html; charset=utf-8", **(headers or {})},
+    )
+
+
+def make_career_extractor(
+    router: ScriptedRouter,
+    *,
+    resolver_mapping: dict[str, list[str]] | None = None,
+    sleeper: FakeSleeper | None = None,
+    jitter: Callable[[float], float] | None = None,
+    registry: dict[str, str] | None = None,
+    **settings_overrides: Any,
+) -> Any:
+    from app.sources.career.extract import CareerPageExtractor
+
+    settings = make_settings(**settings_overrides)
+    return CareerPageExtractor(
+        settings,
+        registry=registry,
+        transport=httpx.MockTransport(router),
+        sleep=sleeper.sleep if sleeper is not None else None,
+        jitter_rng=jitter,
+        resolver=fake_resolver(resolver_mapping),
+    )
+
+
+def robots_ok() -> httpx.Response:
+    return httpx.Response(
+        200,
+        content=b"User-agent: *\nAllow: /",
+        headers={"Content-Type": "text/plain"},
     )
 
 
