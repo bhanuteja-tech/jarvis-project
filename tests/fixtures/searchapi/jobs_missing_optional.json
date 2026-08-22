@@ -1,0 +1,13 @@
+{
+  "search_metadata": {
+    "id": "search_ExampleJobsBare",
+    "status": "Success"
+  },
+  "jobs": [
+    {
+      "position": 1,
+      "title": "Bare Minimum Result",
+      "apply_link": "https://bare.example.com/job/1"
+    }
+  ]
+}

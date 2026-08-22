@@ -17,12 +17,15 @@ import httpx
 from app.config.settings import Settings
 from app.sources.greenhouse.client import GreenhouseClient
 from app.sources.lever.client import LeverClient
+from app.sources.searchapi.client import SearchApiClient
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "greenhouse"
 LEVER_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "lever"
+SEARCHAPI_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "searchapi"
 
 BASE_URL = "https://boards-api.greenhouse.io/v1/boards"
 LEVER_BASE_URL = "https://api.lever.co/v0/postings"
+SEARCHAPI_SEARCH_URL = "https://www.searchapi.io/api/v1/search"
 
 TOKEN = "example_corp"
 SITE = "examplecorp"
@@ -30,6 +33,10 @@ SITE = "examplecorp"
 
 def load_lever_fixture(name: str) -> Any:
     return json.loads((LEVER_FIXTURES_DIR / name).read_text(encoding="utf-8"))
+
+
+def load_searchapi_fixture(name: str) -> Any:
+    return json.loads((SEARCHAPI_FIXTURES_DIR / name).read_text(encoding="utf-8"))
 
 
 def load_fixture_text(name: str) -> str:
@@ -48,10 +55,14 @@ def make_settings(**overrides: Any) -> Settings:
         "database_url": "postgresql+psycopg://user:secret@localhost:5432/jarvis",
         "greenhouse_base_url": BASE_URL,
         "lever_base_url": LEVER_BASE_URL,
+        "searchapi_search_url": SEARCHAPI_SEARCH_URL,
+        "searchapi_api_key": "test-key",
         "greenhouse_timeout_seconds": 30.0,
         "lever_timeout_seconds": 30.0,
+        "searchapi_timeout_seconds": 30.0,
         "greenhouse_max_retries": 3,
         "lever_max_retries": 3,
+        "searchapi_max_retries": 2,
         "log_level": "WARNING",
     }
     values.update(overrides)
@@ -146,6 +157,22 @@ def make_lever_client(
 ) -> LeverClient:
     settings = make_settings(**settings_overrides)
     return LeverClient(
+        settings,
+        transport=httpx.MockTransport(router),
+        sleep=sleeper.sleep if sleeper is not None else None,
+        jitter_rng=jitter,
+    )
+
+
+def make_searchapi_client(
+    router: ScriptedRouter,
+    *,
+    sleeper: FakeSleeper | None = None,
+    jitter: Callable[[float], float] | None = None,
+    **settings_overrides: Any,
+) -> SearchApiClient:
+    settings = make_settings(**settings_overrides)
+    return SearchApiClient(
         settings,
         transport=httpx.MockTransport(router),
         sleep=sleeper.sleep if sleeper is not None else None,

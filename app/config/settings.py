@@ -10,13 +10,14 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 DEFAULT_GREENHOUSE_BASE_URL = "https://boards-api.greenhouse.io/v1/boards"
 DEFAULT_LEVER_BASE_URL = "https://api.lever.co/v0/postings"
+DEFAULT_SEARCHAPI_SEARCH_URL = "https://www.searchapi.io/api/v1/search"
 
 
 class Settings(BaseSettings):
@@ -44,6 +45,15 @@ class Settings(BaseSettings):
     lever_max_pages: int = Field(default=200, ge=1)
     lever_site_registry_path: Path | None = None
 
+    #: SearchApi key. Held as SecretStr so it never renders in logs/reprs.
+    #: Sent only as an Authorization Bearer header, never a query parameter.
+    searchapi_search_url: str = DEFAULT_SEARCHAPI_SEARCH_URL
+    searchapi_api_key: SecretStr = SecretStr("")
+    searchapi_timeout_seconds: float = Field(default=30.0, gt=0)
+    # Retries consume paid quota; keep the default conservative.
+    searchapi_max_retries: int = Field(default=2, ge=0, le=10)
+    searchapi_max_pages: int = Field(default=5, ge=1, le=50)
+
     log_level: str = "INFO"
 
     @field_validator("log_level")
@@ -55,7 +65,7 @@ class Settings(BaseSettings):
             raise ValueError(f"log_level must be one of {sorted(allowed)}")
         return normalized
 
-    @field_validator("greenhouse_base_url", "lever_base_url")
+    @field_validator("greenhouse_base_url", "lever_base_url", "searchapi_search_url")
     @classmethod
     def _validate_source_base_url(cls, value: str) -> str:
         stripped = value.rstrip("/")

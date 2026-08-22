@@ -1,0 +1,20 @@
+{
+  "search_metadata": {
+    "id": "search_ExampleJobsBadItem",
+    "status": "Success"
+  },
+  "jobs": [
+    {
+      "position": 1,
+      "title": null,
+      "company_name": "No Title Corp",
+      "apply_link": "https://notitle.example.com/job/1"
+    },
+    {
+      "position": 2,
+      "title": "Valid Sibling Result",
+      "company_name": "Sibling Co",
+      "apply_link": "https://sibling.example.com/job/2"
+    }
+  ]
+}

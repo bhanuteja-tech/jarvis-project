@@ -1,0 +1,63 @@
+{
+  "search_metadata": {
+    "id": "search_ExampleJobsPage001",
+    "status": "Success",
+    "created_at": "2026-08-22T10:00:00Z",
+    "total_time_taken": 2.1
+  },
+  "search_parameters": {
+    "engine": "google_jobs",
+    "q": "machine learning intern",
+    "hl": "en",
+    "gl": "us"
+  },
+  "search_information": {
+    "query_displayed": "machine learning intern",
+    "detected_location": "New York"
+  },
+  "jobs": [
+    {
+      "position": 1,
+      "title": "Applied AI Engineer",
+      "company_name": "Example AI Corp",
+      "location": "New York, NY",
+      "via": "via Example Careers",
+      "description": "About the role\n\nBuild applied ML systems end to end.\n\nResponsibilities:\n- Ship models to production\n\nRequirements:\n- 3+ years Python",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": ["3+ years of Python experience", "ML fundamentals"]
+        }
+      ],
+      "extensions": ["1 day ago", "Full-time", "Health insurance"],
+      "detected_extensions": {
+        "posted_at": "1 day ago",
+        "schedule": "Full-time",
+        "health_insurance": true
+      },
+      "apply_link": "https://careers.example.com/job/applied-ai-engineer?utm_campaign=google_jobs_apply&utm_source=google_jobs_apply&utm_medium=organic",
+      "apply_links": [
+        {
+          "link": "https://careers.example.com/job/applied-ai-engineer?utm_campaign=google_jobs_apply&utm_source=google_jobs_apply&utm_medium=organic",
+          "source": "Example Careers"
+        }
+      ],
+      "sharing_link": "https://www.google.com/search?ibp=htl;jobs&q=machine+learning+intern&htidocid=2_EkUK_X1ZOKUz-CAAAAAA%3D%3D&hl=en-US&source=sh/x/job/li/m1"
+    },
+    {
+      "position": 2,
+      "title": "Data Engineer (Fallback Identity)",
+      "company_name": "Fallback Co",
+      "location": "Austin, TX",
+      "description": "Build data pipelines for analytics.",
+      "detected_extensions": {
+        "posted_at": "3 days ago",
+        "schedule": "Contract"
+      },
+      "apply_link": "https://fallbackco.example.com/careers/data-engineer"
+    }
+  ],
+  "pagination": {
+    "next_page_token": "TOKEN_PAGE_TWO"
+  }
+}

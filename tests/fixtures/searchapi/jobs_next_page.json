@@ -1,0 +1,30 @@
+{
+  "search_metadata": {
+    "id": "search_ExampleJobsPage002",
+    "status": "Success"
+  },
+  "jobs": [
+    {
+      "position": 3,
+      "title": "Applied AI Engineer (Duplicate Across Pages)",
+      "company_name": "Example AI Corp",
+      "location": "New York, NY",
+      "apply_link": "https://careers.example.com/job/applied-ai-engineer?utm_campaign=google_jobs_apply&utm_source=google_jobs_apply&utm_medium=organic",
+      "sharing_link": "https://www.google.com/search?ibp=htl;jobs&q=machine+learning+intern&htidocid=2_EkUK_X1ZOKUz-CAAAAAA%3D%3D&hl=en-US"
+    },
+    {
+      "position": 4,
+      "title": "Platform Intern",
+      "company_name": "New Co",
+      "location": "Remote",
+      "detected_extensions": {
+        "posted_at": "22 hours ago",
+        "schedule": "Internship"
+      },
+      "apply_link": "https://newco.example.com/careers/platform-intern"
+    }
+  ],
+  "pagination": {
+    "next_page_token": ""
+  }
+}

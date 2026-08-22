@@ -2,11 +2,11 @@
 
 ## Project status / scope lock
 
-Phase 1, Steps 1–2 (Greenhouse + Lever adapters) are the ONLY implemented
-steps. Greenhouse is FROZEN; do not modify it without reporting a genuine
-shared-infrastructure defect first.
+Phase 1, Steps 1–3 (Greenhouse + Lever + SearchApi adapters) are the ONLY
+implemented steps. Greenhouse and Lever are FROZEN; do not modify them
+without reporting a genuine shared-infrastructure defect first.
 
-Do not implement: Adzuna, SearchApi, career-page extraction, deduplication,
+Do not implement: Adzuna, career-page extraction, cross-source deduplication,
 embeddings/semantics, ranking, resume tailoring, ATS scoring, auth, frontend,
 queues/brokers. Phase order is locked; see README roadmap.
 
@@ -21,6 +21,27 @@ queues/brokers. Phase order is locked; see README roadmap.
   treat as optional. No updated-at field exists → `source_updated_at` stays None.
 - Lever `lists` are preserved verbatim in `extra`; NEVER promote them into
   requirements/responsibilities (Phase 2 owns semantic JD extraction).
+
+## SearchApi specifics
+
+- One endpoint serves both engines; the API key travels ONLY as an
+  `Authorization: Bearer` header (`SecretStr` in settings, never logged,
+  never in fixtures/examples). Retries burn paid quota → default retries=2.
+- google_jobs request params are whitelisted to {q, gl, hl, location} plus
+  the internal next_page_token. `time_period` is NOT documented for
+  google_jobs and MUST NOT be sent (adapter drops it with a warning).
+- google_search MAY use documented `time_period` values (last_30_minutes…)
+  and paginates by numeric `page`. NEVER fetch the response's
+  `pagination.next` URL (it is a raw google.com URL — SSRF-safe rule).
+- Google Jobs provides NO job id and NO absolute timestamps. Identity:
+  `gj:<htidocid>` extracted from sharing_link, else deterministic
+  `derived:<uuid5(company|title|location)>`; recorded in
+  `extra.identity_source`.
+- `source_created_at` stays None for SearchApi jobs; relative display text
+  ("1 day ago") is preserved verbatim as `extra.posted_at_display`, never
+  converted to a datetime.
+- Google Search results are discovery CANDIDATES for the future Career Page
+  Extractor; they must never enter canonical jobs or `state.jobs`.
 
 ## Commands
 

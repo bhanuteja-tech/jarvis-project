@@ -1,0 +1,35 @@
+{
+  "search_metadata": {
+    "id": "search_ExampleSearchPage001",
+    "status": "Success"
+  },
+  "search_parameters": {
+    "engine": "google",
+    "q": "machine learning intern site:jobs.example.com",
+    "hl": "en",
+    "gl": "us"
+  },
+  "organic_results": [
+    {
+      "position": 1,
+      "title": "Machine Learning Intern — Example Corp Careers",
+      "link": "https://jobs.example.com/ml-intern-2026",
+      "source": "Example Corp",
+      "domain": "jobs.example.com",
+      "displayed_link": "https://jobs.example.com › ml-intern-2026",
+      "snippet": "Example Corp is hiring a Machine Learning Intern for Summer 2026 in New York.",
+      "date": "2 days ago"
+    },
+    {
+      "position": 2,
+      "title": "ML Internship Posting",
+      "link": "https://careers.example.org/openings/123",
+      "source": "Example Org",
+      "domain": "careers.example.org"
+    }
+  ],
+  "pagination": {
+    "current": 1,
+    "next": "https://www.google.com/search?q=machine+learning+intern&start=10"
+  }
+}

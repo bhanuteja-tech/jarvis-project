@@ -2,7 +2,7 @@
 
 Production-oriented AI Job Discovery and Resume Tailoring System.
 
-**Current status: Phase 1, Steps 1–2 — Greenhouse + Lever source adapters.**
+**Current status: Phase 1, Steps 1–3 — Greenhouse + Lever + SearchApi adapters.**
 
 ## Stack
 
@@ -36,6 +36,9 @@ Health probes: `GET /healthz` (liveness), `GET /readyz` (database check).
 | `LEVER_PAGE_SIZE` | `50` | postings per page request (≤100) |
 | `LEVER_MAX_PAGES` | `200` | hard pagination ceiling per site |
 | `LEVER_SITE_REGISTRY_PATH` | unset | JSON file mapping site → company name |
+| `SEARCHAPI_API_KEY` | empty | SearchApi key (`SecretStr`; Bearer header only; empty = disabled) |
+| `SEARCHAPI_TIMEOUT_SECONDS` / `SEARCHAPI_MAX_RETRIES` | `30` / `2` | retries consume paid quota — keep small |
+| `SEARCHAPI_MAX_PAGES` | `5` | hard pagination ceiling per engine run |
 | `LOG_LEVEL` | `INFO` | DEBUG/INFO/WARNING/ERROR/CRITICAL |
 
 ### Registries
@@ -52,6 +55,22 @@ registries (`greenhouse_boards.example.json`, `lever_sites.example.json`):
 Unknown boards/sites produce jobs with `company = null`. Both registries are
 small Protocols designed to be replaced by persistent storage later without
 adapter changes.
+
+### SearchApi specifics
+
+Two engines under one provider, schemas deliberately separate:
+
+- **google_jobs** (primary discovery): request params restricted to
+  `{q, gl, hl, location}` + internal `next_page_token` — `time_period` is
+  not documented for this engine and is never sent. Google provides no job
+  id and no absolute timestamps: identity is `gj:<htidocid>` from the
+  sharing_link (fallback: deterministic `derived:<uuid5>`), and
+  `source_created_at` stays null — relative text ("1 day ago") is preserved
+  verbatim in `extra.posted_at_display`, never converted.
+- **google** (discovery candidates for the future Career Page Extractor):
+  may use documented `time_period` freshness filters; paginates via numeric
+  `page`; the response's `pagination.next` google.com URL is never fetched.
+  Results become `SearchCandidateResult` objects — never canonical jobs.
 
 ### Lever specifics
 
@@ -82,9 +101,8 @@ pytest -m live tests/test_greenhouse_live_smoke.py
 
 ## Architecture boundaries
 
-- `sources/{greenhouse,lever}/client.py` — HTTP transport, timeouts, status classification.
-- `sources/{greenhouse,lever}/schemas.py` — documented upstream response models.
-- `sources/{greenhouse,lever}/adapter.py` — validation + normalization to canonical `Job`.
+- `sources/{greenhouse,lever,searchapi}/client.py` — HTTP transport, timeouts, status classification.
+- `sources/{greenhouse,lever}/*.py`, `sources/searchapi/*` — documented upstream schemas + normalization to canonical `Job` (SearchApi google engine → candidate URLs instead).
 - `sources/resilience.py` — shared retry/backoff engine (all sources).
 - `graph/workflow.py` — minimal LangGraph foundation; adapters are injected.
 - `db/` — SQLAlchemy persistence; `upsert_jobs` is source-level identity only.
@@ -93,6 +111,6 @@ Canonical flow per source: `API → raw schema → validate → normalize → Jo
 
 ## Roadmap
 
-Phase 1 remaining: Adzuna → SearchApi → career-page extractor → dedup.
+Phase 1 remaining: Adzuna → career-page extractor → dedup.
 Later phases: JD/candidate intelligence, matching, tailoring, truth/ATS
 validation, product integration.
