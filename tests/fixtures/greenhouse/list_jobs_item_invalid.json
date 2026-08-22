@@ -1,0 +1,26 @@
+{
+  "jobs": [
+    {
+      "id": 888002,
+      "internal_job_id": 999002,
+      "title": "Valid Role Among Invalid Peers",
+      "updated_at": "2026-05-01T10:00:00Z",
+      "location": { "name": "Denver, CO" },
+      "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/888002",
+      "language": "en"
+    },
+    {
+      "id": 888003,
+      "title": "Missing Required URL"
+    },
+    {
+      "internal_job_id": 999003,
+      "title": "Negative Id Post",
+      "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/888004",
+      "id": -5
+    }
+  ],
+  "meta": {
+    "total": 3
+  }
+}

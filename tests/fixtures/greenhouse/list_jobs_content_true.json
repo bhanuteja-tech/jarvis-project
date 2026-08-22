@@ -1,0 +1,40 @@
+{
+  "jobs": [
+    {
+      "id": 444001,
+      "internal_job_id": 555001,
+      "title": "Senior Platform Engineer",
+      "updated_at": "2026-07-15T12:00:00-04:00",
+      "requisition_id": "101",
+      "location": { "name": "San Francisco, CA" },
+      "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/444001",
+      "language": "en",
+      "metadata": null,
+      "content": "<p>We are hiring a Senior Platform Engineer to build our core platform.</p><p>Requirements: 5+ years of experience with distributed systems.</p>",
+      "departments": [
+        { "id": 13583, "name": "Engineering", "parent_id": null, "child_ids": [] }
+      ],
+      "offices": [
+        { "id": 8304, "name": "East Coast", "location": "United States", "parent_id": null, "child_ids": [8787] },
+        { "id": 8787, "name": "New York City", "location": "New York, NY, United States", "parent_id": 8304, "child_ids": [] }
+      ]
+    },
+    {
+      "id": 444002,
+      "internal_job_id": null,
+      "title": "General Application",
+      "updated_at": "2026-06-01T00:00:00Z",
+      "requisition_id": null,
+      "location": { "name": "Remote" },
+      "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/444002",
+      "language": "en",
+      "metadata": null,
+      "content": "<p>Don't see a role that fits? Introduce yourself.</p>",
+      "departments": [],
+      "offices": []
+    }
+  ],
+  "meta": {
+    "total": 2
+  }
+}

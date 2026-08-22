@@ -1,0 +1,33 @@
+{
+  "jobs": [
+    {
+      "id": 127817,
+      "internal_job_id": 144381,
+      "title": "Vault Designer",
+      "updated_at": "2016-01-14T10:55:28-05:00",
+      "requisition_id": "50",
+      "location": {
+        "name": "NYC"
+      },
+      "absolute_url": "https://boards.greenhouse.io/vaulttec/jobs/127817",
+      "language": "en",
+      "metadata": null
+    },
+    {
+      "id": 127818,
+      "internal_job_id": 144382,
+      "title": "Backend Engineer",
+      "updated_at": "2026-08-01T09:30:00Z",
+      "requisition_id": "51",
+      "location": {
+        "name": "Berlin, Germany"
+      },
+      "absolute_url": "https://boards.greenhouse.io/vaulttec/jobs/127818",
+      "language": "en",
+      "metadata": null
+    }
+  ],
+  "meta": {
+    "total": 2
+  }
+}

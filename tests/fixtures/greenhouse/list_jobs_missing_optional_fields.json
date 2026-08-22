@@ -1,0 +1,12 @@
+{
+  "jobs": [
+    {
+      "id": 777,
+      "title": "Barebones Role",
+      "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/777"
+    }
+  ],
+  "meta": {
+    "total": 1
+  }
+}

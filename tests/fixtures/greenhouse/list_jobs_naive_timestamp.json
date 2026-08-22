@@ -1,0 +1,16 @@
+{
+  "jobs": [
+    {
+      "id": 888001,
+      "internal_job_id": 999001,
+      "title": "Naive Timestamp Role",
+      "updated_at": "2026-04-01T12:00:00",
+      "location": { "name": "Austin, TX" },
+      "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/888001",
+      "language": "en"
+    }
+  ],
+  "meta": {
+    "total": 1
+  }
+}
