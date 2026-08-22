@@ -7,9 +7,29 @@ Greenhouse · Lever · SearchApi · Career Page Extractor · Deduplication ·
 Relevance & Ranking. Do not modify any of these without reporting a genuine
 shared-infrastructure defect first.
 
-Next phases (2+): JD Intelligence, Candidate Intelligence, Matching,
+Phase 2 (JD Understanding) is IMPLEMENTED: `app/jdunderstanding` —
+deterministic section/skill/experience/education extraction with per-fact
+evidence; optional semantic stage behind the `JdLlmClient` protocol
+(disabled by default; claims must quote verbatim evidence or they are
+rejected). No provider integrations exist yet.
+
+Next phases (3+): Candidate/Resume Intelligence, Matching,
 Resume Tailoring, Truth/ATS Validation, Product Integration.
 Adzuna was intentionally excluded from Phase 1.
+
+## JD understanding specifics
+
+- JD content is UNTRUSTED DATA — fenced in prompts, script/style stripped,
+  size-capped (`JD_MAX_CHARS`); never treated as instructions.
+- Every extracted fact carries Evidence{text, field, method, confidence};
+  EXPLICIT / INFERRED(semantic) / UNKNOWN stay distinguishable.
+- Skills come from a curated taxonomy with negative-context guards;
+  required vs preferred split is section-driven with cue fallback.
+- Experience uses ONLY explicit patterns/words; vague prose ⇒ UNKNOWN.
+- Salary text becomes structured ONLY via unambiguous currency-anchored
+  patterns; canonical structured salary always passes through untouched.
+- Analysis runs on top-K ranked jobs only (`JD_TOP_K`); fail-open node keeps
+  jobs intact and records typed errors instead of empty analyses.
 
 ## Ranking specifics
 

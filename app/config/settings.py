@@ -70,6 +70,15 @@ class Settings(BaseSettings):
     #: optional `playwright` extra is installed.
     career_browser_enabled: bool = False
 
+    # --- Phase 2: JD understanding -----------------------------------------
+    #: Analyze only the top-K ranked jobs (cost control).
+    jd_top_k: int = Field(default=10, ge=1, le=500)
+    #: Hard cap for a single JD's analyzed text.
+    jd_max_chars: int = Field(default=20_000, ge=1_000)
+    #: Optional semantic enhancement stage. OFF by default; requires a client
+    #: implementing the JdLlmClient protocol to be supplied by wiring.
+    jd_llm_enabled: bool = False
+
     log_level: str = "INFO"
 
     @field_validator("log_level")

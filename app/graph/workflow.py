@@ -21,8 +21,10 @@ from collections.abc import Sequence
 
 from langgraph.graph import END, START, StateGraph
 
+from app.config.settings import get_settings
 from app.dedup.cluster import dedupe_jobs
 from app.graph.state import ErrorRecord, GraphState, WarningRecord
+from app.jdunderstanding.analyzer import build_analyzer
 from app.ranking.service import rank_jobs
 from app.sources.base import SourceAdapter
 from app.sources.errors import SourceError
@@ -32,6 +34,7 @@ logger = logging.getLogger(__name__)
 FETCH_SOURCES_NODE = "fetch_sources"
 DEDUP_NODE = "deduplicate_jobs"
 RANK_NODE = "rank_jobs"
+JD_NODE = "analyze_jd"
 
 
 def _error_record_from_exception(adapter: SourceAdapter, exc: BaseException) -> ErrorRecord:
@@ -188,19 +191,60 @@ async def _rank_jobs(state: GraphState) -> dict:
     }
 
 
+async def _analyze_jd(state: GraphState) -> dict:
+    """Fail-open Phase-2 JD understanding over the top-K ranked jobs."""
+    jobs = state.get("jobs") or []
+    ranked = state.get("ranked_jobs") or []
+    try:
+        analyzer = build_analyzer(get_settings())
+        results = await analyzer.analyze_ranked(jobs, ranked)
+    except Exception as exc:  # noqa: BLE001 - fail-open contract
+        logger.exception(
+            "jd analysis failed; jobs preserved",
+            extra={"source": "jd_analysis", "operation": "analyze_jd"},
+        )
+        error = ErrorRecord(
+            source="jd_analysis",
+            kind=type(exc).__name__,
+            retryable=False,
+            message=f"unexpected jd analysis failure; jobs preserved: {exc}",
+            endpoint=None,
+            attempts=0,
+            status_code=None,
+        )
+        warnings = list(state.get("warnings") or [])
+        warnings.append(
+            WarningRecord(
+                source="jd_analysis",
+                code="jd_analysis_failed",
+                message=f"jd analysis failed; analyses unavailable ({exc})",
+            )
+        )
+        return {
+            "errors": [*(state.get("errors") or []), error],
+            "warnings": warnings,
+        }
+
+    return {
+        "jd_analyses": [result.model_dump() for result in results],
+    }
+
+
 def build_workflow(adapters: Sequence[SourceAdapter]):
-    """Compile the Phase-1 discovery graph around the given adapters."""
+    """Compile the Phase-1/2 discovery graph around the given adapters."""
     fetch_sources = _make_fetch_sources_node(adapters)
 
     builder = StateGraph(GraphState)
     builder.add_node(FETCH_SOURCES_NODE, fetch_sources)
     builder.add_node(DEDUP_NODE, _deduplicate_jobs)
     builder.add_node(RANK_NODE, _rank_jobs)
+    builder.add_node(JD_NODE, _analyze_jd)
     builder.add_edge(START, FETCH_SOURCES_NODE)
     builder.add_edge(FETCH_SOURCES_NODE, DEDUP_NODE)
     builder.add_edge(DEDUP_NODE, RANK_NODE)
-    builder.add_edge(RANK_NODE, END)
+    builder.add_edge(RANK_NODE, JD_NODE)
+    builder.add_edge(JD_NODE, END)
     return builder.compile()
 
 
-__all__ = ["DEDUP_NODE", "FETCH_SOURCES_NODE", "RANK_NODE", "build_workflow"]
+__all__ = ["DEDUP_NODE", "FETCH_SOURCES_NODE", "JD_NODE", "RANK_NODE", "build_workflow"]

@@ -2,8 +2,9 @@
 
 Production-oriented AI Job Discovery and Resume Tailoring System.
 
-**Current status: Phase 1 COMPLETE (Steps 1–6): Greenhouse · Lever · SearchApi ·
-Career Page Extractor · Deduplication · Relevance Ranking.**
+**Current status: Phase 2 COMPLETE — JD Understanding added on top of the
+frozen Phase 1 pipeline (Steps 1–6: Greenhouse · Lever · SearchApi ·
+Career Page Extractor · Deduplication · Relevance Ranking).**
 
 ## Stack
 

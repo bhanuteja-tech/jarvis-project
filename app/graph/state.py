@@ -43,6 +43,9 @@ class GraphState(TypedDict, total=False):
     # index; the canonical `jobs` list itself is never reordered or modified.
     ranked_jobs: list[dict[str, Any]]
     ranking_summary: dict[str, Any]
+    # Phase 2 (additive): per-job JD analyses + analysis failure records.
+    jd_analyses: list[dict[str, Any]]
+    analysis_errors: list[dict[str, Any]]
 
 
 __all__ = ["ErrorRecord", "GraphState", "WarningRecord"]
