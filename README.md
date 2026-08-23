@@ -2,9 +2,10 @@
 
 Production-oriented AI Job Discovery and Resume Tailoring System.
 
-**Current status: Phase 6 COMPLETE — Truth + ATS Validation added on top of
-the frozen pipeline (Phases 1–5: discovery · JD understanding · candidate
-profiling · matching · tailoring).**
+**Current status: Phase 7 COMPLETE — Jarvis product layer added (WebSocket
+agentic session channel + vanilla ES-module SPA with robot avatar, chat,
+resume upload, voice I/O, streamed pipeline progress, tailored resume and
+validation display) on top of the frozen Phase 1–6 pipeline.**
 
 ## Stack
 

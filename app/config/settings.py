@@ -97,6 +97,11 @@ class Settings(BaseSettings):
     #: token-subset truth guard or the original bullet is retained.
     tailoring_llm_enabled: bool = False
 
+    # --- Phase 7: Jarvis product layer ---------------------------------------
+    jarvis_max_concurrent_runs: int = Field(default=4, ge=1, le=64)
+    jarvis_assistant_llm_enabled: bool = False
+    jarvis_ws_path: str = "/ws/jarvis"
+
     log_level: str = "INFO"
 
     @field_validator("log_level")

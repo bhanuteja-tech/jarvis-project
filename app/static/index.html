@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jarvis — Job Discovery Assistant</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header>
+    <div id="avatar" class="avatar idle">
+      <div class="head"><div class="eye left"></div><div class="eye right"></div></div>
+      <div class="torso"></div>
+    </div>
+    <h1>Jarvis <span id="avatar-state">idle</span></h1>
+    <label class="tts-toggle"><input type="checkbox" id="tts-enabled" /> speak</label>
+  </header>
+
+  <main>
+    <section id="chat-panel">
+      <div id="messages"></div>
+      <form id="chat-form">
+        <input id="chat-input" type="text" autocomplete="off"
+               placeholder='Try: find machine learning engineer in berlin' />
+        <button type="button" id="mic-btn" title="Voice input">&#127908;</button>
+        <button type="submit">Send</button>
+      </form>
+    </section>
+
+    <section id="side-panel">
+      <details open><summary>Resume</summary>
+        <input type="file" id="resume-file" accept=".txt,.md" />
+        <div id="resume-status">No resume uploaded.</div>
+      </details>
+      <details><summary>Pipeline progress</summary><ul id="node-log"></ul></details>
+      <details><summary>Tailored resume</summary><pre id="tailored-view"></pre></details>
+      <details><summary>Validation</summary><pre id="validation-view"></pre></details>
+    </section>
+  </main>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

@@ -53,6 +53,24 @@ after tailoring; single additive state key `validation_report`.
 Next phases (7): Product Integration.
 Adzuna was intentionally excluded from Phase 1.
 
+Phase 7 (Product Integration + Agentic UX) is IMPLEMENTED: `app/jarvis` +
+`app/api/routes/jarvis.py` + `app/static` — WebSocket session channel with
+typed event envelopes, deterministic intent grammar (assistant LLM protocol
+stub, default OFF), orchestrator executing the frozen compiled graph via
+astream(stream_mode="updates"), in-memory session store, vanilla ES-module
+SPA (robot avatar state machine, chat, resume upload, browser voice,
+streamed progress, tailored-resume/validation display).
+
+## Jarvis specifics
+
+- The compiled Phase 1–6 graph is the ONLY execution engine; the Jarvis
+  layer never duplicates pipeline logic.
+- One active run per connection: new run cancels the previous task.
+- Event envelopes are typed/seq-numbered; unknown types ignored by clients.
+- PII never enters events, narration, or logs.
+- Sessions are in-memory and lost on restart (documented decision).
+- Assistant LLM disabled by default; deterministic grammar is the v1 UX.
+
 ## Validation specifics
 
 - Read-only: never regenerates/repairs the tailored resume; reports only.
