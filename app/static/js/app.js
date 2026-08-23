@@ -1,115 +1,124 @@
-// Jarvis SPA: chat, avatar state machine, resume upload, voice, results view.
-import { setAvatarState, avatarFromEvent } from "./avatar.js";
-import { sttSupported, startListening, speak } from "./voice.js";
+// Application coordinator: wires WS events -> state store -> UI modules.
+
+import { setAvatarState, avatarFromEvent } from "./avatar/avatar.js";
+import { sttSupported, startListening, speak, cancelSpeak } from "./voice.js";
 import { connectJarvis, sendEnvelope } from "./ws.js";
+import { getState, setState, patchRun, setArtifacts, markNodeStarted, markNodeCompleted } from "./state.js";
+import { mapEvent } from "./events-map.js";
+import { addMessage } from "./ui/messages.js";
+import { renderJobCards } from "./ui/jobs.js";
+import { renderTailoredResume } from "./ui/resume.js";
+import { renderValidation } from "./ui/validation.js";
+import { initActivityCenter, markActivityStarted, markActivityCompleted, markActivityFailed } from "./ui/activity.js";
+import { initUploadZone } from "./ui/upload.js";
 
 const $ = (id) => document.getElementById(id);
 const sessionId = crypto.randomUUID?.() || String(Date.now());
 let ws = null;
 let connected = false;
+let lastSeqRef = {};
 
-function addMessage(role, text) {
-  const div = document.createElement("div");
-  div.className = `msg ${role}`;
-  div.textContent = text;
-  $("messages").appendChild(div);
-  $("messages").scrollTop = $("messages").scrollHeight;
-}
-
-function addNodeLog(nodeName) {
-  const li = document.createElement("li");
-  li.textContent = `✓ ${nodeName}`;
-  $("node-log").appendChild(li);
-}
-
-function handleEvent(envelope) {
-  avatarFromEvent(envelope.type);
-
-  switch (envelope.type) {
-    case "workflow_node_completed":
-      addNodeLog(envelope.data.node);
-      break;
-
-    case "assistant_message": {
-      const text = envelope.data.text || "";
-      addMessage("assistant", text);
-      speak(text, { enabled: $("tts-enabled").checked });
-      renderAttachments(envelope.data.attachments || [], envelope);
-      setAvatarState("done");
-      break;
-    }
-
-    case "agent_error":
-    case "error":
-      addMessage("error", `${envelope.data.code || "error"}: ${envelope.data.message || ""}`);
-      setAvatarState("error");
-      break;
-
-    case "listening_started":
-      setAvatarState("listening");
-      break;
-  }
-}
-
-function renderAttachments(attachments, envelope) {
-  if (!attachments.length) return;
-  fetch(`/api/runs/${envelope.run_id}/result`)
-    .then((r) => (r.ok ? r.json() : null))
-    .then((snapshot) => {
-      if (!snapshot) return;
-      $("validation-view").textContent = JSON.stringify(
-        {
-          validation_status: snapshot.validation_status,
-          tailored_target_index: snapshot.tailored_target_index,
-        },
-        null,
-        2
-      );
-    })
-    .catch(() => {});
-  // Full structured resume lives in session.last_state via the final run;
-  // a dedicated result endpoint can be added later without breaking this UI.
-  void envelope;
-}
+initActivityCenter($("node-log"));
+initUploadZone($("upload-zone"), {
+  onFile: (file) => sendEnvelope(ws, "resume_upload", file),
+  maxChars: 30000,
+});
 
 function startSession() {
   ws = connectJarvis({
     sessionId,
-    onOpen: () => setAvatarState("idle"),
-    onClose: () => setTimeout(startSession, 2000),
+    onOpen: () => { setState({ connected: true }); setAvatarState("idle"); },
+    onClose: () => {
+      setState({ connected: false });
+      setAvatarState("idle");
+      setTimeout(startSession, 2000);
+    },
     onEvent: handleEvent,
   });
 }
 
+function handleEvent(envelope) {
+  avatarFromEvent(envelope.type);
+  const mapped = mapEvent(envelope, lastSeqRef);
+
+  if (!mapped) return;
+
+  if (mapped.runStatus) patchRun({ status: mapped.runStatus, runId: envelope.run_id });
+  if (mapped.avatar) setAvatarState(mapped.avatar);
+
+  if (mapped.nodeStarted) markNodeStarted(mapped.nodeStarted.node, mapped.nodeStarted.label);
+  if (mapped.nodeCompleted) markNodeCompleted(mapped.nodeCompleted);
+
+  if (mapped.resumeParsed) {
+    $("resume-status").textContent =
+      `✓ Resume parsed: ${mapped.resumeParsed.skills_found || 0} skills, ` +
+      `${mapped.resumeParsed.experience_items || 0} experience entries.`;
+    $("resume-status").className = "ok";
+  }
+
+  if (mapped.assistantMessage) {
+    const msg = mapped.assistantMessage;
+    addMessage($("messages"), "assistant", msg.text);
+
+    // Populate workspace artifacts from result_snapshot.
+    if (msg.resultSnapshot) {
+      setArtifacts(msg.resultSnapshot);
+      renderJobCards($("job-cards"), msg.resultSnapshot.jobs || [], msg.resultSnapshot.match_results || []);
+      if (msg.resultSnapshot.tailored_resume) {
+        renderTailoredResume($("tailored-view"), msg.resultSnapshot.tailored_resume);
+      }
+      if (msg.resultSnapshot.validation_report) {
+        renderValidation($("validation-view"), msg.resultSnapshot.validation_report);
+      }
+    }
+
+    // Speak the reply.
+    speak(msg.text, { enabled: $("tts-enabled").checked });
+  }
+
+  if (mapped.errorText) {
+    addMessage($("messages"), "error", mapped.errorText);
+  }
+
+  if (envelope.type === "listening_started") setAvatarState("listening");
+}
+
+// ---- Chat form -------------------------------------------------------------
 $("chat-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const input = $("chat-input");
   const text = input.value.trim();
-  if (!text || !connected) return;
-  addMessage("user", text);
+  if (!text) return;
+  cancelSpeak();
+  addMessage($("messages"), "user", text);
+  session_append_user(text);
   sendEnvelope(ws, "chat", { text });
   input.value = "";
 });
 
+// ---- Voice ------------------------------------------------------------------
 $("mic-btn").addEventListener("click", () => {
   if (!sttSupported()) {
-    addMessage("error", "Speech recognition is not supported in this browser.");
+    addMessage($("messages"), "error",
+      "Speech recognition is not supported in this browser.");
     return;
   }
-  sendEnvelope(ws, "listening_started");
+  setAvatarState("listening");
+  $("mic-btn").classList.add("recording");
   startListening((transcript) => {
-    sendEnvelope(ws, "listening_stopped");
-    addMessage("user", transcript);
+    $("mic-btn").classList.remove("recording");
+    setAvatarState("thinking");
+    addMessage($("messages"), "user", transcript);
     sendEnvelope(ws, "chat", { text: transcript });
   });
 });
 
-$("resume-file").addEventListener("change", (event) => {
-  const file = event.target.files[0];
-  if (!file) return;
-  file.text().then((content) => {
-    sendEnvelope(ws, "resume_upload", { name: file.name, content });
-  });
-});
+function cancelSpeak() {
+  import("./voice.js").then((m) => m.speak("", { enabled: true }));
+}
+
+function session_append_user(text) {
+  // Session store is server-side; local echo is enough for UI.
+}
 
 startSession();

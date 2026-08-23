@@ -1,0 +1,41 @@
+/* Avatar: SVG state-driven animations + particles (rAF only). */
+
+#avatar-container { width:76px; height:76px; position:relative; }
+
+.avatar-state-idle .core { animation: breathe 4s ease-in-out infinite; }
+@keyframes breathe { 50% { transform: scale(1.05); } }
+.avatar-state-idle .halo { stroke-opacity: .1; transition: stroke-opacity 1s; }
+
+.avatar-state-listening .waveform { opacity: 1 !important; }
+.avatar-state-listening .wf { animation: wave .9s infinite alternate; }
+.avatar-state-listening .wf:nth-child(2n) { animation-delay: .15s; }
+.avatar-state-listening .wf:nth-child(3n) { animation-delay: .3s; }
+@keyframes wave { from { height: 6px; } to { height: 28px; } }
+.avatar-state-listening .eye { fill: #3fb950 !important; }
+
+.avatar-state-thinking .scan-line,
+.avatar-state-analyzing .scan-line { animation: scan 1.4s infinite alternate ease-in-out; opacity: .7 !important; }
+@keyframes scan { from { transform: translateY(-16px); } to { transform: translateY(16px); } }
+
+.avatar-state-searching .orbit-ring { animation: rotate 5s linear infinite; transform-origin: 100px 100px; }
+@keyframes rotate { to { transform: rotate(360deg); } }
+
+.avatar-state-matching .face { animation: match-glow 1.2s infinite; }
+@keyframes match-glow { 50% { filter: brightness(1.35); } }
+
+.avatar-state-tailoring .core { animation: tailor-pulse .8s infinite alternate; }
+@keyframes tailor-pulse { to { stroke-width: 4; } }
+
+.avatar-state-validating .halo { animation: verify-ring 1s infinite alternate; stroke-opacity:.4 !important; }
+@keyframes verify-ring { from { r: 50; } to { r: 55; } }
+
+.avatar-state-speaking .waveform { opacity: 1 !important; }
+.avatar-state-speaking .wf { animation: wave .6s infinite alternate; }
+.avatar-state-speaking .mouth { animation: talk .4s infinite alternate; }
+@keyframes talk { 50% { d: path('M86 108 Q100 100 114 108'); } }
+
+.avatar-state-done .eye { fill: #3fb950 !important; }
+.avatar-state-done .core { animation: success-sweep 1s ease-out 1 forwards; }
+@keyframes success-sweep { from { filter: brightness(2); } to { filter: brightness(1); } }
+
+.avatar-state-error .eye, .avatar-state-error .mouth { fill: var(--err) !important; stroke: var(--err) !important; }

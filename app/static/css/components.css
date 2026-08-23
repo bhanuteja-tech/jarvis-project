@@ -1,0 +1,74 @@
+/* Components: job cards, chips, validation panels, activity, upload, why-view. */
+
+.job-card { background:var(--bg-3); border:1px solid var(--line);
+  border-radius:var(--radius); padding:12px; margin:6px 0;
+  display:flex; flex-direction:column; gap:8px; }
+.job-card__head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+
+.chip { display:inline-block; padding:2px 8px; border-radius:12px;
+  font-size:12px; margin:2px 3px; }
+.chip--missing { background:#f8514918; color:var(--err); border:1px solid #f8514940; }
+.chip.req-required { background:#3fb95218; color:var(--ok); }
+.chip.req-preferred { background:#d2992218; color:var(--warn); }
+.chip.req-additional { background:var(--bg-3); color:var(--muted); }
+
+.score-ring { display:inline-block; vertical-align:middle; }
+
+.warn-box { background:#d2992215; border:1px solid #d2992240;
+  color:var(--warn); padding:10px 14px; border-radius:var(--radius-sm);
+  margin:8px 0; font-size:13px; }
+.error-box { background:#f8514915; border:1px solid #f8514940;
+  color:var(--err); padding:10px 14px; border-radius:var(--radius-sm);
+  margin:8px 0; font-size:13px; }
+
+.validation-banner { text-align:center; font-size:28px; font-weight:bold;
+  letter-spacing:4px; padding:16px; border-radius:var(--radius); margin-bottom:12px; }
+.status-pass { color:var(--ok); background:#3fb95215; }
+.status-warn { color:var(--warn); background:#d2992215; }
+.status-fail { color:var(--err); background:#f8514915; }
+
+.validation-panel { background:var(--bg-3); border-radius:var(--radius-sm);
+  padding:10px; margin:8px 0; border:1px solid var(--line); }
+.truth-title.pass { color:var(--ok); } .truth-title.fail { color:var(--err); }
+.ats-title.pass { color:var(--ok); } .ats-title.warn { color:var(--warn); }
+
+.check-row { display:flex; gap:8px; align-items:flex-start; font-size:13px;
+  padding:4px 0; }
+.check-passed { color:var(--ok) } .check-failed { color:var(--err) }
+.check-warning { color:var(--warn) } .check-info { color:var(--muted) }
+
+.metrics-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:8px 0; }
+.metric { text-align:center; padding:8px; background:var(--bg-0);
+  border-radius:var(--radius-sm); border:1px solid var(--line); }
+.metric strong { font-size:20px; display:block; }
+.metric small { color:var(--muted); }
+
+.keyword-table { width:100%; font-size:12px; border-collapse:collapse; margin:8px 0; }
+.keyword-table th, .keyword-table td { padding:4px 8px; border:1px solid var(--line); text-align:left; }
+.keyword-table th { color:var(--muted); font-weight:normal; }
+
+.activity-list { list-style:none; padding:0; margin:0; }
+.activity-row { display:flex; align-items:center; gap:10px; padding:6px 0; font-size:14px; }
+.activity-row.pending { color:var(--dim) } .activity-row.done { color:var(--text) }
+.activity-row.active { color:var(--accent) } .activity-row.failed { color:var(--err) }
+.activity-icon { width:18px; text-align:center; }
+
+.upload-zone { border:2px dashed var(--line-light); border-radius:var(--radius);
+  padding:24px; text-align:center; cursor:pointer; color:var(--muted);
+  transition:border-color .15s; margin:8px 0; min-height:44px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.upload-zone:hover, .upload-zone.drag-over { border-color:var(--accent); color:var(--accent); }
+.upload-status.done { color:var(--ok) } .upload-status.error { color:var(--err) }
+.upload-status.working { color:var(--accent) }
+
+.bullet-row { display:flex; gap:6px; align-items:flex-start; margin:4px 0; }
+.why-btn { padding:2px 8px; min-height:auto; font-size:11px; border-radius:10px;
+  border-color:var(--accent-dim); color:var(--accent); }
+.why-panel { background:var(--bg-0); border:1px solid var(--line);
+  padding:10px; margin:6px 0; border-radius:var(--radius-sm); font-size:13px; }
+.why-panel hr { margin:6px 0 }
+.skill-row { display:flex; gap:8px; align-items:center; margin:3px 0; }
+.exp-block { margin:10px 0; padding-left:12px; border-left:2px solid var(--line); }
+
+#mic-btn.recording { color:var(--err); border-color:var(--err); animation:pulse-red 1s infinite; }
+@keyframes pulse-red { 50% { box-shadow:0 0 12px #f8514960 } }

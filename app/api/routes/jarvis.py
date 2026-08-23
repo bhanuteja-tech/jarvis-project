@@ -44,6 +44,27 @@ async def ws_jarvis(websocket: WebSocket) -> None:
                     ),
                     "validation_status": validation_status(session.last_state),
                 }
+                # Safe artifact snapshot for the workspace views.
+                jobs = [
+                    {
+                        "title": job.get("title"),
+                        "company": job.get("company"),
+                        "location": job.get("location"),
+                        "job_url": job.get("job_url"),
+                    }
+                    for job in session.last_state.get("jobs") or []
+                    if isinstance(job, dict)
+                ]
+                _run_artifacts[run_id] = {
+                    "jobs": jobs,
+                    "match_results": list(
+                        session.last_state.get("match_results") or []
+                    ),
+                    "tailored_resume": session.last_state.get("tailored_resume"),
+                    "validation_report": session.last_state.get(
+                        "validation_report"
+                    ),
+                }
 
     try:
         while True:
@@ -98,6 +119,18 @@ async def run_result(run_id: str) -> dict[str, Any]:
     if snapshot is None:
         raise HTTPException(status_code=404, detail="unknown run id")
     return snapshot
+
+
+@router.get("/api/runs/{run_id}/artifacts")
+async def run_artifacts(run_id: str) -> dict[str, Any]:
+    """Safe structured artifacts for the frontend workspace (PII-free)."""
+    artifacts = _run_artifacts.get(run_id)
+    if artifacts is None:
+        raise HTTPException(status_code=404, detail="unknown run id")
+    return artifacts
+
+
+_run_artifacts: dict[str, dict[str, Any]] = {}
 
 
 __all__ = ["router"]

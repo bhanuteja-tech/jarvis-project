@@ -266,18 +266,52 @@ class JarvisOrchestrator:
         async with semaphore:
             task = asyncio.current_task()
             self._current_task = task
+            completed_nodes: set[str] = set()
+            started_nodes: set[str] = set()
+
+            def _emit_started(node: str) -> None:
+                started_nodes.add(node)
+                from app.jarvis.pipeline_order import LABELS
+
+                emitter_task = emitter.emit(
+                    ev.EventType.WORKFLOW_NODE_STARTED,
+                    run_id=run_id,
+                    node=node,
+                    label=LABELS.get(node, node),
+                )
+                return emitter_task
+
+            for head in ("fetch_sources", "build_candidate_profile"):
+                started_nodes.add(head)
+                await emitter.emit(
+                    ev.EventType.WORKFLOW_NODE_STARTED,
+                    run_id=run_id,
+                    node=head,
+                    label=_label_for(head),
+                )
             try:
                 async for update in graph.astream(state, stream_mode="updates"):
                     for node_name, node_update in update.items():
                         if not isinstance(node_update, dict):
                             continue
                         _merge(final_state, node_update)
+                        completed_nodes.add(node_name)
                         await emitter.emit(
                             ev.EventType.WORKFLOW_NODE_COMPLETED,
                             run_id=run_id,
                             node=node_name,
                             keys=sorted(node_update.keys()),
                         )
+                        from app.jarvis.pipeline_order import derive_next_starts
+
+                        for nxt in derive_next_starts(completed_nodes, started_nodes):
+                            started_nodes.add(nxt)
+                            await emitter.emit(
+                                ev.EventType.WORKFLOW_NODE_STARTED,
+                                run_id=run_id,
+                                node=nxt,
+                                label=_label_for(nxt),
+                            )
             except asyncio.CancelledError:
                 await emitter.emit(ev.EventType.RUN_CANCELLED, run_id=run_id)
                 raise
@@ -291,6 +325,10 @@ class JarvisOrchestrator:
             reply = f"{select_hint}\n{reply}"
         session.append_message("assistant", reply)
 
+        result_snapshot = _result_snapshot(final_state)
+        attachments.extend([
+            {"kind": "result_snapshot", **result_snapshot}
+        ])
         await self._speak(emitter, run_id, reply, attachments)
         await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
 
@@ -320,6 +358,36 @@ class JarvisOrchestrator:
             text=text,
             attachments=attachments or [],
         )
+
+
+def _label_for(node: str) -> str:
+    from app.jarvis.pipeline_order import LABELS
+
+    return LABELS.get(node, node)
+
+
+def _result_snapshot(final_state: Mapping[str, Any]) -> dict[str, Any]:
+    """Safe artifact snapshot for the frontend workspace (PII-free).
+
+    Includes only structured Phase 4–6 artifacts plus minimal job echo
+    fields. Never includes identity/contact/errors-with-PII.
+    """
+    jobs = [
+        {
+            "title": job.get("title"),
+            "company": job.get("company"),
+            "location": job.get("location"),
+            "job_url": job.get("job_url"),
+        }
+        for job in final_state.get("jobs") or []
+        if isinstance(job, Mapping)
+    ]
+    return {
+        "jobs": jobs,
+        "match_results": list(final_state.get("match_results") or []),
+        "tailored_resume": final_state.get("tailored_resume"),
+        "validation_report": final_state.get("validation_report"),
+    }
 
 
 def _safe_params(params: Mapping[str, Any]) -> dict[str, Any]:
