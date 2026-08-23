@@ -26,10 +26,10 @@ from app.candidate.analyzer import ResumeAnalyzer
 from app.dedup.cluster import dedupe_jobs
 from app.graph.state import ErrorRecord, GraphState, WarningRecord
 from app.jdunderstanding.analyzer import build_analyzer
-from app.matching.service import match_jobs
 from app.ranking.service import rank_jobs
 from app.sources.base import SourceAdapter
 from app.sources.errors import SourceError
+from app.tailoring.service import tailor_resume
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,7 @@ DEDUP_NODE = "deduplicate_jobs"
 RANK_NODE = "rank_jobs"
 JD_NODE = "analyze_jd"
 MATCHING_NODE = "match_candidate_to_jobs"
+TAILOR_NODE = "tailor_resume"
 
 
 def _error_record_from_exception(adapter: SourceAdapter, exc: BaseException) -> ErrorRecord:
@@ -338,8 +339,66 @@ async def _match_candidate_to_jobs(state: GraphState) -> dict:
     }
 
 
+async def _tailor_resume(state: GraphState) -> dict:
+    """Fail-open Phase-5 resume tailoring for the top matched job."""
+    candidate_result = state.get("candidate_profile")
+    if not isinstance(candidate_result, dict) or not candidate_result:
+        warnings = list(state.get("warnings") or [])
+        warnings.append(
+            WarningRecord(
+                source="tailoring",
+                code="tailoring_skipped_no_candidate",
+                message="no usable candidate profile; tailoring skipped",
+            )
+        )
+        return {"warnings": warnings}
+
+    jobs = state.get("jobs") or []
+    match_results = state.get("match_results") or []
+    jd_analyses = state.get("jd_analyses") or []
+    prefs_raw = (state.get("search_preferences") or {}).get("tailoring")
+
+    try:
+        outcome = tailor_resume(
+            candidate_result,
+            match_results,
+            jd_analyses,
+            jobs,
+            prefs_raw if isinstance(prefs_raw, dict) else None,
+            get_settings(),
+        )
+    except Exception as exc:  # noqa: BLE001 - fail-open contract
+        logger.exception(
+            "tailoring failed; all prior state preserved",
+            extra={"source": "tailoring", "operation": "tailor_resume"},
+        )
+        error = ErrorRecord(
+            source="tailoring",
+            kind=type(exc).__name__,
+            retryable=False,
+            message=f"unexpected tailoring failure; state preserved: {exc}",
+            endpoint=None,
+            attempts=0,
+            status_code=None,
+        )
+        warnings = list(state.get("warnings") or [])
+        warnings.append(
+            WarningRecord(
+                source="tailoring",
+                code="tailoring_failed",
+                message=f"tailoring failed ({exc})",
+            )
+        )
+        return {
+            "errors": [*(state.get("errors") or []), error],
+            "warnings": warnings,
+        }
+
+    return {"tailored_resume": outcome.result.model_dump()}
+
+
 def build_workflow(adapters: Sequence[SourceAdapter]):
-    """Compile the Phase-1/2/3/4 discovery graph around the given adapters."""
+    """Compile the Phase-1..5 discovery graph around the given adapters."""
     fetch_sources = _make_fetch_sources_node(adapters)
 
     builder = StateGraph(GraphState)
@@ -349,13 +408,15 @@ def build_workflow(adapters: Sequence[SourceAdapter]):
     builder.add_node(RANK_NODE, _rank_jobs)
     builder.add_node(JD_NODE, _analyze_jd)
     builder.add_node(MATCHING_NODE, _match_candidate_to_jobs)
+    builder.add_node(TAILOR_NODE, _tailor_resume)
     builder.add_edge(START, FETCH_SOURCES_NODE)
     builder.add_edge(START, CANDIDATE_NODE)
     builder.add_edge(FETCH_SOURCES_NODE, DEDUP_NODE)
     builder.add_edge(DEDUP_NODE, RANK_NODE)
     builder.add_edge(RANK_NODE, JD_NODE)
     builder.add_edge(JD_NODE, MATCHING_NODE)
-    builder.add_edge(MATCHING_NODE, END)
+    builder.add_edge(MATCHING_NODE, TAILOR_NODE)
+    builder.add_edge(TAILOR_NODE, END)
     # Independent parallel candidate branch (Phase 3).
     builder.add_edge(CANDIDATE_NODE, END)
     return builder.compile()
@@ -368,5 +429,6 @@ __all__ = [
     "JD_NODE",
     "MATCHING_NODE",
     "RANK_NODE",
+    "TAILOR_NODE",
     "build_workflow",
 ]

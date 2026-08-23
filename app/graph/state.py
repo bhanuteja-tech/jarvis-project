@@ -54,6 +54,8 @@ class GraphState(TypedDict, total=False):
     # `jobs` / `ranked_jobs` are never reordered by matching.
     match_results: list[dict[str, Any]]
     matching_summary: dict[str, Any]
+    # Phase 5 (additive): TailoringResult dump (status + tailored resume).
+    tailored_resume: dict[str, Any]
 
 
 __all__ = ["ErrorRecord", "GraphState", "WarningRecord"]

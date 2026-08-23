@@ -29,9 +29,31 @@ education 8 / level 5 / salary 5), tiers strong≥75 moderate≥50,
 deterministic tie-breaks. Fail-open `match_candidate_to_jobs` node after
 JD analysis; `match_results`/`matching_summary` additive state keys.
 
-Next phases (5+): Resume Tailoring, Truth/ATS Validation, Product
-Integration. Matching consumes `candidate_profile` × `jd_analyses`.
+Phase 5 (Resume Tailoring) is IMPLEMENTED: `app/tailoring` — deterministic
+selection/ordering/emphasis over CandidateProfile evidence (never the raw
+resume), template summary, canonical skill display, highlight/project caps,
+dedupe; `unaddressed_jd_requirements` surfaced, never inserted; token-
+subset truth guard (content ⊆ candidate evidence); optional LLM bullet
+rewriting behind `TailoringLlmClient`, default OFF, unverifiable rewrites
+rejected. Fail-open `tailor_resume` node after matching;
+`tailored_resume` additive state key. PII excluded from output.
+
+Next phases (6+): Truth/ATS Validation, Product Integration.
 Adzuna was intentionally excluded from Phase 1.
+
+## Tailoring specifics
+
+- Original CandidateProfile is immutable source of truth; tailoring emits a
+  NEW artifact and never mutates profile/match_results/jd_analyses.
+- Allowed ops: section selection/ordering, skill prioritization (canonical
+  display names), highlight selection (matched-skill + JD-responsibility
+  overlap, capped), project ranking, duplicate-bullet removal, template
+  summary from verified facts only.
+- Forbidden: inserting missing skills, inventing metrics/dates/titles/
+  employers/achievements, keyword stuffing (frequency may not exceed the
+  original resume's), semantic rewrites without the truth guard.
+- Target = match_results[0] unless
+  `search_preferences['tailoring']['target_job_index']` overrides it.
 
 ## JD understanding specifics
 

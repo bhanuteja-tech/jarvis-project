@@ -87,6 +87,16 @@ class Settings(BaseSettings):
     #: profile after construction; ``redacted`` is set on the profile.
     candidate_redact_pii: bool = False
 
+    # --- Phase 5: Resume tailoring ------------------------------------------
+    #: Maximum kept highlights per tailored experience item.
+    tailor_max_highlights: int = Field(default=3, ge=1, le=10)
+    #: Maximum projects in the tailored resume.
+    tailor_max_projects: int = Field(default=3, ge=0, le=20)
+    #: Optional LLM bullet rewriting. OFF by default; requires a client
+    #: implementing the TailoringLlmClient protocol. Every rewrite passes the
+    #: token-subset truth guard or the original bullet is retained.
+    tailoring_llm_enabled: bool = False
+
     log_level: str = "INFO"
 
     @field_validator("log_level")
