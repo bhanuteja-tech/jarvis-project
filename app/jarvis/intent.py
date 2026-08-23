@@ -34,7 +34,9 @@ class DisabledAssistantLlmClient:
         raise RuntimeError("assistant LLM is disabled by configuration")
 
 
-_SELECT_TARGET_RE = re.compile(r"(?:tailor|use|pick|select)\s+(?:job\s+|match\s+|#)?(\d{1,3})", re.IGNORECASE)
+_SELECT_TARGET_RE = re.compile(
+    r"(?:tailor|use|pick|select)\s+(?:job\s+|match\s+|#)?(\d{1,3})", re.IGNORECASE
+)
 _IN_RE = re.compile(r"\bin\s+([A-Za-z ,]+)$", re.IGNORECASE)
 
 
@@ -62,9 +64,7 @@ def parse_intent(text: str) -> Plan:
         location_match = _IN_RE.search(cleaned)
         if location_match is not None:
             locations = [
-                part.strip()
-                for part in location_match.group(1).split(",")
-                if part.strip()
+                part.strip() for part in location_match.group(1).split(",") if part.strip()
             ]
             params["locations"] = locations
         return Plan(
@@ -92,4 +92,10 @@ GRAMMAR_HELP = (
 )
 
 
-__all__ = ["AssistantLlmClient", "DisabledAssistantLlmClient", "Plan", "GRAMMAR_HELP", "parse_intent"]
+__all__ = [
+    "AssistantLlmClient",
+    "DisabledAssistantLlmClient",
+    "Plan",
+    "GRAMMAR_HELP",
+    "parse_intent",
+]

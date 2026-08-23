@@ -68,6 +68,28 @@ _PREFIX_RULES: tuple[tuple[str, ResumeSectionKind], ...] = (
     ("selected ", ResumeSectionKind.PROJECTS),
 )
 
+# Conservative cues for plain-text headings that name a REAL section but are
+# absent from the canonical lexicon (e.g. "Volunteer Work"). Without a cue
+# the line stays body text — project names must never become sections.
+_UNRESOLVED_HEADING_CUES: frozenset[str] = frozenset(
+    {
+        "volunteer",
+        "volunteering",
+        "activities",
+        "interests",
+        "hobbies",
+        "awards",
+        "achievements",
+        "honors",
+        "publications",
+        "references",
+        "portfolio",
+        "affiliations",
+        "languages",
+        "background",
+    }
+)
+
 _TRAILING_PUNCT = re.compile(r"[:：\s]+$")
 
 
@@ -137,20 +159,27 @@ def segment_resume(document: TextDocument) -> ResumeSegmentation:
             if kind is not None:
                 is_heading = True
                 label = block.text.strip()
+            else:
+                # Plain-text heading naming an unsupported section: retain it
+                # as OTHER rather than silently demoting it to body prose.
+                tokens = set(normalize_heading(block.text).split())
+                if tokens & _UNRESOLVED_HEADING_CUES:
+                    is_heading = True
+                    kind = ResumeSectionKind.OTHER
+                    label = block.text.strip()
+                    unrecognized += 1
 
         if is_heading:
             if kind is None:
                 kind = ResumeSectionKind.OTHER
                 unrecognized += 1
-            sections.append(
-                ResumeSection(kind=kind, label=label, line_start=line_cursor)
-            )
+            sections.append(ResumeSection(kind=kind, label=label, line_start=line_cursor))
             continue
 
         sections[-1].blocks.append(block)
         line_cursor += 1
 
-    body = [section for section in sections if section.blocks or section.kind is not ResumeSectionKind.OTHER]
+    body = [s for s in sections if s.blocks or s.kind is not ResumeSectionKind.OTHER]
     return ResumeSegmentation(sections=body or sections, unrecognized_headings=unrecognized)
 
 
@@ -159,7 +188,11 @@ def build_document(text: str, *, max_chars: int) -> TextDocument:
     return extract_text_document(text, max_chars=max_chars)
 
 
-def section_of(segmentation: ResumeSegmentation, kind: ResumeSectionKind) -> ResumeSection | None:
+def section_of(
+    segmentation: ResumeSegmentation | None, kind: ResumeSectionKind
+) -> ResumeSection | None:
+    if segmentation is None:
+        return None
     for section in segmentation.sections:
         if section.kind is kind:
             return section

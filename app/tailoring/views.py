@@ -11,12 +11,9 @@ All reads normalize enum-vs-string defensively. PII blocks are never read.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
-
-from app.dedup.normalize import base_normalize
 
 
 def _val(value: Any) -> Any:
@@ -25,8 +22,8 @@ def _val(value: Any) -> Any:
 
 @dataclass(frozen=True)
 class SkillRef:
-    name: str       # canonical taxonomy name (lowercase)
-    display: str    # candidate's matched_as spelling
+    name: str  # canonical taxonomy name (lowercase)
+    display: str  # candidate's matched_as spelling
 
 
 @dataclass(frozen=True)
@@ -277,10 +274,12 @@ def resolve_target(
     # Default: best match first; prefer entries whose analysis is available.
     ordered = sorted(
         enumerate(results),
-        key=lambda pair: 0
-        if str(_val(pair[1].get("status"))).lower() in {"analyzed", "partial"}
-        and pair[1].get("analysis")
-        else 1,
+        key=lambda pair: (
+            0
+            if str(_val(pair[1].get("status"))).lower() in {"analyzed", "partial"}
+            and pair[1].get("analysis")
+            else 1
+        ),
     )
     fallback_error: str | None = None
     for _, wrapper in ordered:

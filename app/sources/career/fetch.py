@@ -43,9 +43,7 @@ from app.sources.resilience import RETRYABLE_STATUS_CODES, RetryPolicy, execute_
 
 logger = logging.getLogger(__name__)
 
-PAGE_CONTENT_TYPES: frozenset[str] = frozenset(
-    {"text/html", "application/xhtml+xml"}
-)
+PAGE_CONTENT_TYPES: frozenset[str] = frozenset({"text/html", "application/xhtml+xml"})
 ROBOTS_CONTENT_TYPES: frozenset[str] = frozenset(
     {"text/plain", "text/html", "application/octet-stream"}
 )
@@ -130,9 +128,7 @@ class GuardedFetcher:
     ) -> FetchedPage:
         """Fetch one URL through the full SSRF/redirect/cap gate."""
         max_hops = (
-            max_redirects
-            if max_redirects is not None
-            else self._settings.career_max_redirects
+            max_redirects if max_redirects is not None else self._settings.career_max_redirects
         )
         current = url
         visited: dict[str, int] = {}

@@ -183,9 +183,7 @@ class TestPartialDataPolicy:
         assert not result.errors
 
     async def test_missing_optional_fields_remain_none(self) -> None:
-        router = ScriptedRouter(
-            json_response(load_lever_fixture("postings_missing_optional.json"))
-        )
+        router = ScriptedRouter(json_response(load_lever_fixture("postings_missing_optional.json")))
         adapter = make_adapter(router)
 
         result = await fetch_single_site(router, adapter)
@@ -213,9 +211,7 @@ class TestPartialDataPolicy:
         assert len(failed) == 1
 
     async def test_whitespace_title_fails_canonical_validation(self) -> None:
-        router = ScriptedRouter(
-            json_response(load_lever_fixture("postings_whitespace_title.json"))
-        )
+        router = ScriptedRouter(json_response(load_lever_fixture("postings_whitespace_title.json")))
         adapter = make_adapter(router)
 
         result = await fetch_single_site(router, adapter)

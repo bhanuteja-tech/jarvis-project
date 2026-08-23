@@ -19,7 +19,7 @@ Rules:
 
 from __future__ import annotations
 
-from app.matching.models import ComponentResult, MatchResult, MatchingSummary
+from app.matching.models import ComponentResult, MatchingSummary, MatchResult
 from app.matching.service import MatchingOutcome, match_jobs
 
 __all__ = [

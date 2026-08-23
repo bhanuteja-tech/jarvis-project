@@ -28,24 +28,18 @@ class TestBaseNormalize:
 
 class TestCompanyKey:
     def test_legal_suffixes_stripped(self) -> None:
-        assert normalize_company("Acme Software Inc.") == normalize_company(
-            "acme software"
-        )
+        assert normalize_company("Acme Software Inc.") == normalize_company("acme software")
 
     def test_suffix_chain_collapses(self) -> None:
         assert normalize_company("Acme Co Ltd") == normalize_company("acme")
 
     def test_leading_article_dropped(self) -> None:
-        assert normalize_company("The Boring Company") == normalize_company(
-            "boring company"
-        )
+        assert normalize_company("The Boring Company") == normalize_company("boring company")
 
 
 class TestTitleKey:
     def test_parenthetical_removed(self) -> None:
-        assert normalize_title("Backend Engineer (Remote)") == normalize_title(
-            "backend engineer"
-        )
+        assert normalize_title("Backend Engineer (Remote)") == normalize_title("backend engineer")
 
     def test_separators_collapse(self) -> None:
         assert normalize_title("Engineer - Platform | Backend") == (
@@ -54,9 +48,7 @@ class TestTitleKey:
 
     def test_seniority_remains_distinct(self) -> None:
         """Mandated false-positive guard: seniority is a different job."""
-        assert normalize_title("Senior Software Engineer") != normalize_title(
-            "software engineer"
-        )
+        assert normalize_title("Senior Software Engineer") != normalize_title("software engineer")
 
 
 class TestLocationKey:
@@ -70,9 +62,8 @@ class TestLocationKey:
 
     def test_micro_map_applies(self) -> None:
         assert location_key("NYC") == location_key("New York")
-        assert (
-            location_key("San Francisco, United States of America")
-            == location_key("san francisco us")
+        assert location_key("San Francisco, United States of America") == location_key(
+            "san francisco us"
         )
 
     def test_none_location_is_none(self) -> None:

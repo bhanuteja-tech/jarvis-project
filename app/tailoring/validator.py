@@ -12,38 +12,40 @@ a resolvable evidence path.
 from __future__ import annotations
 
 import logging
-import re
-from collections import Counter
+from collections.abc import Iterable
 from typing import Any, Protocol, runtime_checkable
 
-from app.dedup.normalize import base_normalize
+from app.dedup.normalize import informative_tokens
 
 logger = logging.getLogger(__name__)
 
-_TOKEN_RE = re.compile(r"[a-z0-9+#]+")
 
-
-def content_tokens(text: str) -> list[str]:
-    return _TOKEN_RE.findall(text.lower())
+def content_tokens(text: str) -> set[str]:
+    """Informative tokens: stopwords removed; digit-bearing tokens kept."""
+    return informative_tokens(text)
 
 
 class TruthinessValidator:
-    """Multiset-subset guard over the candidate evidence corpus."""
+    """Subset guard over the candidate evidence corpus.
 
-    def __init__(self, evidence_texts: list[str]) -> None:
-        allowed: Counter[str] = Counter()
+    Semantics: content ⊆ candidate evidence over informative tokens
+    (generic filler words ignored). Tokens containing digits are never
+    ignorable, so invented metrics cannot slip through.
+    """
+
+    def __init__(self, evidence_texts: Iterable[str]) -> None:
+        allowed: set[str] = set()
         for text in evidence_texts:
             if isinstance(text, str):
-                allowed.update(content_tokens(text))
-        self._allowed = allowed
+                allowed |= content_tokens(text)
+        self._allowed = frozenset(allowed)
 
     @property
-    def allowed_tokens(self) -> Counter[str]:
-        return Counter(self._allowed)
+    def allowed_tokens(self) -> frozenset[str]:
+        return self._allowed
 
     def is_supported(self, text: str) -> bool:
-        used = Counter(content_tokens(text))
-        unsupported = [token for token, count in used.items() if count > self._allowed.get(token, 0)]
+        unsupported = sorted(content_tokens(text) - self._allowed)
         if unsupported:
             logger.info(
                 "tailored text rejected by truth guard",

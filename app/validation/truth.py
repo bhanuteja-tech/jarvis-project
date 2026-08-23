@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
-from app.dedup.normalize import base_normalize
+from app.dedup.normalize import base_normalize, informative_tokens
 from app.jdunderstanding.taxonomy import find_skill_hits
 from app.validation.models import CheckResult
 from app.validation.resolver import (
@@ -15,17 +15,20 @@ from app.validation.resolver import (
     resolve_path,
 )
 
+
 def _val(value: Any) -> Any:
     return value.value if hasattr(value, "value") else value
 
 
-_TOKEN_RE = re.compile(r"[a-z0-9+#]+")
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-_PHONE_RE = re.compile(r"(?:\+?\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)[\s.-]?)?\d{3}[\s.-]?\d{3,4}(?:[\s.-]?\d{2,4})?")
+_PHONE_RE = re.compile(
+    r"(?:\+?\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)[\s.-]?)?\d{3}[\s.-]?\d{3,4}(?:[\s.-]?\d{2,4})?"
+)
 
 
-def _tokens(text: str) -> Counter[str]:
-    return Counter(_TOKEN_RE.findall(text.lower()))
+def _tokens(text: str) -> set[str]:
+    """Informative tokens — shared lexicon with the Phase 5 truth guard."""
+    return informative_tokens(text)
 
 
 def _iter_tailored_texts(tailored: Mapping[str, Any]) -> list[tuple[str, str]]:
@@ -35,7 +38,11 @@ def _iter_tailored_texts(tailored: Mapping[str, Any]) -> list[tuple[str, str]]:
     if isinstance(summary.get("text"), str) and summary["text"].strip():
         pairs.append(("summary.text", summary["text"]))
     for index, item in enumerate(tailored.get("experience") or []):
+        if not isinstance(item, Mapping):
+            continue
         for bullet in item.get("highlights") or []:
+            if not isinstance(bullet, Mapping):
+                continue
             final_text = bullet.get("final_text")
             if isinstance(final_text, str) and final_text.strip():
                 bullet_ref = bullet.get("evidence_ref") or ""
@@ -43,26 +50,27 @@ def _iter_tailored_texts(tailored: Mapping[str, Any]) -> list[tuple[str, str]]:
     return pairs
 
 
-def _check_containment(
-    tailored: Mapping[str, Any], profile: Mapping[str, Any]
-) -> CheckResult:
-    allowed = Counter(_TOKEN_RE.findall(" ".join(gather_evidence_corpus(profile)).lower()))
+def _check_containment(tailored: Mapping[str, Any], profile: Mapping[str, Any]) -> CheckResult:
+    # Set-containment (content ⊆ candidate evidence): repetition is not
+    # fabrication — frequency inflation is A5 keyword-stuffing's concern.
+    allowed = set(_tokens(" ".join(gather_evidence_corpus(profile))))
     unsupported: list[str] = []
     checked = 0
     for field_label, text in _iter_tailored_texts(tailored):
         checked += 1
         used = _tokens(text)
-        over = [token for token, count in used.items() if count > allowed.get(token, 0)]
+        over = [token for token in used if token not in allowed]
         if over:
             unsupported.extend(f"{field_label}:{token}" for token in over[:5])
     if unsupported:
         return CheckResult(
-            "T1_token_containment", "failed",
-            f"unsupported tokens not present in candidate evidence: "
-            f"{', '.join(unsupported[:8])}",
+            "T1_token_containment",
+            "failed",
+            f"unsupported tokens not present in candidate evidence: {', '.join(unsupported[:8])}",
         )
     return CheckResult(
-        "T1_token_containment", "passed",
+        "T1_token_containment",
+        "passed",
         f"{checked} tailored text surface(s) contained within candidate evidence",
     )
 
@@ -72,7 +80,6 @@ def _check_original_fidelity(
 ) -> CheckResult:
     problems: list[str] = []
     for index, item in enumerate(tailored.get("experience") or []):
-        source_index = item.get("source_index")
         for bullet in item.get("highlights") or []:
             original = bullet.get("original_text")
             final_text = bullet.get("final_text")
@@ -98,10 +105,15 @@ def _check_original_fidelity(
                 problems.append(f"rewrite not contained at experience[{index}]")
     if problems:
         return CheckResult(
-            "T2_original_fidelity", "failed",
+            "T2_original_fidelity",
+            "failed",
             "; ".join(problems[:6]),
         )
-    return CheckResult("T2_original_fidelity", "passed", "all originals verbatim; rewrites contained")
+    return CheckResult(
+        "T2_original_fidelity",
+        "passed",
+        "all originals verbatim; rewrites contained",
+    )
 
 
 def _check_evidence_refs_resolvable(
@@ -115,11 +127,13 @@ def _check_evidence_refs_resolvable(
             unresolved.append(ref)
     if unresolved:
         return CheckResult(
-            "T3_evidence_refs_resolvable", "failed",
+            "T3_evidence_refs_resolvable",
+            "failed",
             f"unresolved evidence refs: {', '.join(unresolved[:5])}",
         )
     return CheckResult(
-        "T3_evidence_refs_resolvable", "passed",
+        "T3_evidence_refs_resolvable",
+        "passed",
         f"{len(refs)} evidence ref(s) resolved against the candidate profile",
     )
 
@@ -158,11 +172,13 @@ def _check_no_fabricated_skills(
 
     if fabricated:
         return CheckResult(
-            "T4_unsupported_skills", "failed",
+            "T4_unsupported_skills",
+            "failed",
             f"skills without candidate evidence: {', '.join(fabricated[:8])}",
         )
     return CheckResult(
-        "T4_unsupported_skills", "passed",
+        "T4_unsupported_skills",
+        "passed",
         "all tailored skills exist in candidate evidence and the taxonomy",
     )
 
@@ -178,29 +194,31 @@ def _check_missing_never_inserted(
     leaked = [
         requirement
         for requirement in unaddressed
-        if isinstance(requirement, str)
-        and requirement.strip().lower() in tailored_names
+        if isinstance(requirement, str) and requirement.strip().lower() in tailored_names
     ]
     if leaked:
         return CheckResult(
-            "T5_missing_skills_not_inserted", "failed",
+            "T5_missing_skills_not_inserted",
+            "failed",
             f"unaddressed requirements appear as skills: {', '.join(leaked)}",
         )
 
     if analysis is not None:
         missing_required = match_result.get("missing_required") or [] if match_result else []
         inserted_missing = [
-            name for name in missing_required
-            if isinstance(name, str)
-            and name.strip().lower() in tailored_names
+            name
+            for name in missing_required
+            if isinstance(name, str) and name.strip().lower() in tailored_names
         ]
         if inserted_missing:
             return CheckResult(
-                "T5_missing_skills_not_inserted", "failed",
+                "T5_missing_skills_not_inserted",
+                "failed",
                 f"missing_required skills inserted: {', '.join(inserted_missing)}",
             )
     return CheckResult(
-        "T5_missing_skills_not_inserted", "passed",
+        "T5_missing_skills_not_inserted",
+        "passed",
         "no missing JD requirement was inserted into the resume",
     )
 
@@ -225,9 +243,7 @@ def check_experience_consistency(
 
     for index, item in enumerate(tailored.get("experience") or []):
         source_index = item.get("source_index")
-        if not isinstance(source_index, int) or not (
-            0 <= source_index < len(profile_items)
-        ):
+        if not isinstance(source_index, int) or not (0 <= source_index < len(profile_items)):
             failures.append(f"experience[{index}] has invalid source_index")
             continue
         source = profile_items[source_index]
@@ -236,9 +252,7 @@ def check_experience_consistency(
             tailored_value = item.get(field_name)
             source_value = source.get(field_name)
             if tailored_value is not None and tailored_value != source_value:
-                failures.append(
-                    f"experience[{index}].{field_name} differs from candidate evidence"
-                )
+                failures.append(f"experience[{index}].{field_name} differs from candidate evidence")
 
         date_range = item.get("date_range_raw")
         expected_range = (
@@ -264,22 +278,16 @@ def check_experience_consistency(
     return failures, infos
 
 
-def check_project_consistency(
-    tailored: Mapping[str, Any], profile: Mapping[str, Any]
-) -> list[str]:
+def check_project_consistency(tailored: Mapping[str, Any], profile: Mapping[str, Any]) -> list[str]:
     failures: list[str] = []
     profile_projects = (profile.get("projects") or {}).get("items") or []
     for index, item in enumerate(tailored.get("projects") or []):
         source_index = item.get("source_index")
-        if not isinstance(source_index, int) or not (
-            0 <= source_index < len(profile_projects)
-        ):
+        if not isinstance(source_index, int) or not (0 <= source_index < len(profile_projects)):
             failures.append(f"projects[{index}] has invalid source_index")
             continue
         source = profile_projects[source_index]
-        tailored_techs = {
-            str(tech).lower() for tech in item.get("technologies") or []
-        }
+        tailored_techs = {str(tech).lower() for tech in item.get("technologies") or []}
         source_techs = {
             str(_val(tech.get("name"))).lower()
             for tech in source.get("technologies") or []
@@ -292,7 +300,6 @@ def check_project_consistency(
                 + ", ".join(sorted(extra))
             )
     return failures
-
 
 
 def run_truth_checks(
@@ -315,18 +322,20 @@ def run_truth_checks(
     project_failures = check_project_consistency(tailored, candidate_profile)
     if consistency_failures or project_failures:
         t6 = CheckResult(
-            "T6_employer_title_date_consistency", "failed",
+            "T6_employer_title_date_consistency",
+            "failed",
             "; ".join((consistency_failures + project_failures)[:6]),
         )
     else:
         t6 = CheckResult(
-            "T6_employer_title_date_consistency", "passed",
+            "T6_employer_title_date_consistency",
+            "passed",
             "titles, employers, and date ranges match candidate evidence",
         )
 
     duplicates: list[str] = []
     seen: dict[str, int] = {}
-    for index, item in enumerate(tailored.get("experience") or []):
+    for _index, item in enumerate(tailored.get("experience") or []):
         for bullet in item.get("highlights") or []:
             key = base_normalize(str(bullet.get("final_text")))
             seen[key] = seen.get(key, 0) + 1
@@ -334,7 +343,8 @@ def run_truth_checks(
                 duplicates.append(key[:40])
     if duplicates:
         t8 = CheckResult(
-            "T8_duplicate_content", "failed",
+            "T8_duplicate_content",
+            "failed",
             f"duplicate bullets detected ({len(duplicates)})",
         )
     else:
@@ -344,12 +354,12 @@ def run_truth_checks(
     for _field_label, text in _iter_tailored_texts(tailored):
         pii_hit_count += len(_EMAIL_RE.findall(text))
         pii_hit_count += sum(
-            1 for m in _PHONE_RE.finditer(text)
-            if 7 <= sum(ch.isdigit() for ch in m.group(0)) <= 15
+            1 for m in _PHONE_RE.finditer(text) if 7 <= sum(ch.isdigit() for ch in m.group(0)) <= 15
         )
     if pii_hit_count:
         t9 = CheckResult(
-            "T9_pii_absence", "failed",
+            "T9_pii_absence",
+            "failed",
             f"pii-like patterns found in tailored output (count={pii_hit_count})",
         )
     else:
@@ -357,10 +367,12 @@ def run_truth_checks(
 
     meta = tailored.get("metadata") or {}
     rewrite_records = [
-        change for change in tailored.get("changes") or []
-        if change.get("operation") == "bullet_rewrite_llm"
+        change
+        for change in tailored.get("changes") or []
+        if isinstance(change, Mapping) and change.get("operation") == "bullet_rewrite_llm"
     ]
-    deterministic_only = bool(meta.get("deterministic_only"))
+    # Absent metadata defaults to deterministic mode (the safe Phase 5 default).
+    deterministic_only = bool(meta.get("deterministic_only", True))
     source_profile_id = tailored.get("source_profile_id")
     profile_id = candidate_profile.get("profile_id")
     t10_problems: list[str] = []

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from app.tailoring.rules import (
     build_summary,
-    content_tokens,
     order_experience_items,
     rank_projects,
     select_highlights,
@@ -19,17 +18,21 @@ def skill(name, display=None):
 
 
 def exp(index, highlights=(), skill_names=(), duration_months=None, title="Engineer"):
-    return ExpRef(index=index, title=title, company="Acme",
-                  date_range="Jan 2020 - Dec 2021", highlights=tuple(highlights),
-                  duration_months=duration_months,
-                  skill_names=frozenset(skill_names))
+    return ExpRef(
+        index=index,
+        title=title,
+        company="Acme",
+        date_range="Jan 2020 - Dec 2021",
+        highlights=tuple(highlights),
+        duration_months=duration_months,
+        skill_names=frozenset(skill_names),
+    )
 
 
 class TestSkillTagging:
     def test_required_first_then_preferred_then_additional(self) -> None:
         tagged = tag_and_rank_skills(
-            (skill("zookeeper"), skill("python"), skill("airflow"),
-             skill("sql")),
+            (skill("zookeeper"), skill("python"), skill("airflow"), skill("sql")),
             required_skills=frozenset({"python"}),
             preferred_skills=frozenset({"sql"}),
         )
@@ -38,9 +41,7 @@ class TestSkillTagging:
         assert tags == ["required", "preferred", "additional", "additional"]
 
     def test_unaddressed_requirements(self) -> None:
-        missing = unaddressed_requirements(
-            frozenset({"python", "pytorch"}), frozenset({"python"})
-        )
+        missing = unaddressed_requirements(frozenset({"python", "pytorch"}), frozenset({"python"}))
 
         assert missing == ["pytorch"]
 
@@ -87,7 +88,8 @@ class TestExperienceOrdering:
         )
 
         order = order_experience_items(
-            items, matched_skills=frozenset({"python", "sql"}),
+            items,
+            matched_skills=frozenset({"python", "sql"}),
             responsibility_tokens=frozenset(),
         )
 
@@ -97,12 +99,9 @@ class TestExperienceOrdering:
 class TestProjectRanking:
     def test_matched_tech_first_capped(self) -> None:
         projects = (
-            ProjRef(index=0, name="Game", description=None, url=None,
-                    tech_names=("rust",)),
-            ProjRef(index=1, name="ETL", description=None, url=None,
-                    tech_names=("python", "sql")),
-            ProjRef(index=2, name="Site", description=None, url=None,
-                    tech_names=("python",)),
+            ProjRef(index=0, name="Game", description=None, url=None, tech_names=("rust",)),
+            ProjRef(index=1, name="ETL", description=None, url=None, tech_names=("python", "sql")),
+            ProjRef(index=2, name="Site", description=None, url=None, tech_names=("python",)),
         )
 
         selected, change = rank_projects(
@@ -114,27 +113,19 @@ class TestProjectRanking:
 
     def test_no_matched_projects_returns_empty(self) -> None:
         projects = (
-            ProjRef(index=0, name="Game", description=None, url=None,
-                    tech_names=("rust",)),
+            ProjRef(index=0, name="Game", description=None, url=None, tech_names=("rust",)),
         )
 
-        selected, _change = rank_projects(
-            projects, matched_skills=frozenset({"python"}), cap=3
-        )
+        selected, _change = rank_projects(projects, matched_skills=frozenset({"python"}), cap=3)
 
         assert selected == []
 
 
 class TestSummaryTemplate:
     def test_full_template(self) -> None:
-        text, refs = build_summary(
-            "Data Engineer", 6.0, ["python", "sql"]
-        )
+        text, refs = build_summary("Data Engineer", 6.0, ["python", "sql"])
 
-        assert text == (
-            "Data Engineer with 6 years of experience, "
-            "focused on python, sql."
-        )
+        assert text == ("Data Engineer with 6 years of experience, focused on python, sql.")
         assert "resume.experience[-1].title" in refs
 
     def test_years_none_omits_clause(self) -> None:

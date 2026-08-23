@@ -6,7 +6,8 @@ Contact/identity are never touched.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
 def _num(value: Any) -> float | None:
@@ -22,7 +23,7 @@ def narrate(state: Mapping[str, Any] | None) -> tuple[str, list[dict[str, Any]]]
     lines: list[str] = []
 
     jobs = state.get("jobs") or []
-    ranked = state.get("ranked_jobs") or []
+    state.get("ranked_jobs") or []
     matches = state.get("match_results") or []
     tailored_result = state.get("tailored_resume") or {}
     report = state.get("validation_report") or {}
@@ -55,10 +56,7 @@ def narrate(state: Mapping[str, Any] | None) -> tuple[str, list[dict[str, Any]]]
             lines.append(f"\nTailored summary: {summary_text}")
         unaddressed = resume.get("unaddressed_jd_requirements") or []
         if unaddressed:
-            lines.append(
-                "JD skills you do not yet show evidence for: "
-                + ", ".join(unaddressed)
-            )
+            lines.append("JD skills you do not yet show evidence for: " + ", ".join(unaddressed))
         attachments.append({"kind": "tailored_resume", "job_index": resume.get("target_job_index")})
 
     overall = report.get("overall_status")
@@ -77,9 +75,7 @@ def narrate(state: Mapping[str, Any] | None) -> tuple[str, list[dict[str, Any]]]
     errors = state.get("errors") or []
     failed_sources = sorted({error.get("source") for error in errors})
     if failed_sources:
-        lines.append(
-            "Note: some steps reported errors (" + ", ".join(failed_sources) + ")."
-        )
+        lines.append("Note: some steps reported errors (" + ", ".join(failed_sources) + ").")
 
     return "\n".join(lines), attachments
 

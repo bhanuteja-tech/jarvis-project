@@ -46,10 +46,7 @@ class TestBasics:
         assert "dedup" not in (outcome.jobs[0].get("extra") or {})
 
     def test_distinct_companies_stay_separate(self) -> None:
-        jobs = [
-            make_job(source_job_id=str(i), company=f"Company {i}")
-            for i in range(20)
-        ]
+        jobs = [make_job(source_job_id=str(i), company=f"Company {i}") for i in range(20)]
 
         outcome = dedupe_jobs(jobs)
 
@@ -154,9 +151,7 @@ class TestCanonicalSelection:
 
         outcome = dedupe_jobs([later, earlier])
 
-        assert (
-            outcome.jobs[0]["source_created_at"] == "2026-01-05T00:00:00+00:00"
-        )
+        assert outcome.jobs[0]["source_created_at"] == "2026-01-05T00:00:00+00:00"
 
     def test_provenance_sources_list_includes_every_member(self) -> None:
         a = make_job()
@@ -231,8 +226,6 @@ class TestPotentialDuplicateWarnings:
         outcome = dedupe_jobs(jobs)
 
         potential = [w for w in outcome.warnings if w["code"] == "potential_duplicate"]
-        truncated = [
-            w for w in outcome.warnings if w["code"] == "potential_duplicate_truncated"
-        ]
+        truncated = [w for w in outcome.warnings if w["code"] == "potential_duplicate_truncated"]
         assert len(potential) == 50
         assert len(truncated) == 1

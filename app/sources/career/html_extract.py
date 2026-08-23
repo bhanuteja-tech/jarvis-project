@@ -54,9 +54,7 @@ class DomSignals:
 
     @property
     def spa_indicators(self) -> bool:
-        return (
-            self.spa_root_present or self.body_text_len < 400
-        ) and self.script_char_count > 4000
+        return (self.spa_root_present or self.body_text_len < 400) and self.script_char_count > 4000
 
 
 def _text_of(element: Tag | None) -> str | None:
@@ -109,17 +107,11 @@ def extract_dom_signals(html: str) -> DomSignals:
     signals = DomSignals(
         title_tag=_text_of(soup.title),
         h1_text=_text_of(soup.h1),
-        meta_description=(
-            meta_desc.get("content", "").strip() if meta_desc else None
-        ),
+        meta_description=(meta_desc.get("content", "").strip() if meta_desc else None),
         og_title=og_title.get("content", "").strip() if og_title else None,
-        canonical_link=(
-            canonical.get("href", "").strip() if canonical else None
-        ),
+        canonical_link=(canonical.get("href", "").strip() if canonical else None),
         apply_links=apply_links,
-        internal_job_links=sum(
-            1 for a in soup.find_all("a") if "/jobs" in (a.get("href") or "")
-        ),
+        internal_job_links=sum(1 for a in soup.find_all("a") if "/jobs" in (a.get("href") or "")),
         requisition_ids=_requisition_ids_from_html(html),
         main_text_len=len(main_region.get_text(" ", strip=True)) if main_region else 0,
         main_html=str(main_region) if main_region else None,

@@ -12,12 +12,10 @@ from app.config.settings import Settings
 from app.tailoring.generator import gather_evidence_corpus, generate_tailored_resume
 from app.tailoring.models import (
     ChangeRecord,
-    TailoredResume,
     TailoringResult,
     TailoringStatus,
 )
 from app.tailoring.validator import (
-    DisabledTailoringLlmClient,
     TruthinessValidator,
     rewrite_selected_bullet,
 )
@@ -31,7 +29,7 @@ class TailoringOutcome:
     result: TailoringResult
 
 
-def tailor_resume(
+async def tailor_resume(
     candidate_result: Mapping[str, Any] | None,
     match_results: Sequence[Mapping[str, Any]] | None,
     jd_analyses: Sequence[Mapping[str, Any]] | None,
@@ -45,8 +43,9 @@ def tailor_resume(
     profile_view = build_profile_view(candidate_result)
     if not profile_view.usable:
         return TailoringOutcome(
-            result=TailoringResult(status=TailoringStatus.SKIPPED,
-                                   reason="no_usable_candidate_profile")
+            result=TailoringResult(
+                status=TailoringStatus.SKIPPED, reason="no_usable_candidate_profile"
+            )
         )
 
     override_index = None
@@ -58,8 +57,7 @@ def tailor_resume(
     resolution = resolve_target(match_results or [], jd_analyses or [], jobs or [], override_index)
     if resolution.error_reason is not None:
         return TailoringOutcome(
-            result=TailoringResult(status=TailoringStatus.FAILED,
-                                   reason=resolution.error_reason)
+            result=TailoringResult(status=TailoringStatus.FAILED, reason=resolution.error_reason)
         )
     assert resolution.target is not None  # error_reason None implies target
     target = resolution.target
@@ -98,8 +96,7 @@ def tailor_resume(
                     llm,
                     validator,
                     original_text=bullet.final_text,
-                    jd_context=target.responsibilities_text
-                    or (target.title or ""),
+                    jd_context=target.responsibilities_text or (target.title or ""),
                 )
                 llm_used = True
                 if accepted and final_text != bullet.final_text:
@@ -115,10 +112,24 @@ def tailor_resume(
                     warnings.append(warning)
 
     status = TailoringStatus.TAILORED
-    if resolution.analysis_missing or not draft.skills or not any(
-        item.highlights for item in draft.experience
+    if (
+        resolution.analysis_missing
+        or not draft.skills
+        or not any(item.highlights for item in draft.experience)
     ):
         status = TailoringStatus.PARTIAL
+        if resolution.analysis_missing:
+            draft.changes.append(
+                ChangeRecord(
+                    operation="degraded_mode",
+                    section=f"jobs[{target.job_index}]",
+                    reason=(
+                        "jd analysis unavailable for the target job; emphasis and "
+                        "unaddressed-requirement surfacing degraded"
+                    ),
+                    evidence_refs=[],
+                )
+            )
 
     draft.metadata.deterministic_only = not llm_used
     draft.metadata.duration_ms = round((time.perf_counter() - started) * 1000, 2)
@@ -133,16 +144,15 @@ def tailor_resume(
             "changes": len(draft.changes),
         },
     )
-    return TailoringOutcome(
-        result=TailoringResult(status=status, resume=draft)
-    )
+    return TailoringOutcome(result=TailoringResult(status=status, resume=draft))
 
 
 def build_service(settings: Settings, *, llm_client: Any | None = None):
     """Wiring helper returning a ready async callable."""
 
-    async def _service(candidate_result, match_results, jd_analyses, jobs,
-                       tailoring_prefs=None) -> TailoringOutcome:
+    async def _service(
+        candidate_result, match_results, jd_analyses, jobs, tailoring_prefs=None
+    ) -> TailoringOutcome:
         return await tailor_resume(
             candidate_result,
             match_results,

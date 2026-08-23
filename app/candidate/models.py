@@ -9,7 +9,7 @@ first-class state and is never back-filled with guesses.
 from __future__ import annotations
 
 import uuid
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -23,12 +23,12 @@ from app.jdunderstanding.models import (
 from app.ranking.preferences import EmploymentType
 
 
-class SourceFormat(str, Enum):
+class SourceFormat(StrEnum):
     PLAIN_TEXT = "plain_text"
     STRUCTURED = "structured"
 
 
-class ResumeSectionKind(str, Enum):
+class ResumeSectionKind(StrEnum):
     SUMMARY = "summary"
     EXPERIENCE = "experience"
     EDUCATION = "education"
@@ -39,7 +39,7 @@ class ResumeSectionKind(str, Enum):
     OTHER = "other"
 
 
-class DegreeLevel(str, Enum):
+class DegreeLevel(StrEnum):
     ASSOCIATE = "associate"
     BACHELOR = "bachelor"
     MASTER = "master"
@@ -89,7 +89,7 @@ class ExperienceItem(BaseModel):
     location: str | None = None
     start_raw: str | None = None
     end_raw: str | None = None
-    start_iso: str | None = None   # YYYY-MM-DD (month/day defaults documented)
+    start_iso: str | None = None  # YYYY-MM-DD (month/day defaults documented)
     end_iso: str | None = None
     is_current: bool = False
     duration_months: int | None = None
@@ -199,16 +199,7 @@ class CandidateResult(BaseModel):
     errors: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class CandidateInputError(CareerCandidateErrorBase):
-    pass
-
-
-class CareerCandidateErrorBase(Exception):
-    """Internal marker base; typed failures travel via CandidateResult."""
-
-
 __all__ = [
-    "CandidateInputError",
     "CandidateProfile",
     "CandidateResult",
     "CertificationsField",

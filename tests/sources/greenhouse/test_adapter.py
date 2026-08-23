@@ -162,9 +162,7 @@ class TestPartialDataPolicy:
         assert len(failed) == 2
 
     async def test_whitespace_only_title_fails_canonical_validation(self) -> None:
-        router = ScriptedRouter(
-            json_response(load_fixture("list_jobs_whitespace_title.json"))
-        )
+        router = ScriptedRouter(json_response(load_fixture("list_jobs_whitespace_title.json")))
         adapter = make_adapter(router)
 
         result = await adapter.fetch_board(TOKEN)
@@ -247,9 +245,7 @@ class TestMultiBoardOrchestration:
         client = make_client(router)
         adapter = GreenhouseAdapter(client, registry=load_board_registry(None))
 
-        result = await adapter.fetch_jobs(
-            {"greenhouse": {"board_tokens": [TOKEN, TOKEN]}}
-        )
+        result = await adapter.fetch_jobs({"greenhouse": {"board_tokens": [TOKEN, TOKEN]}})
 
         assert router.call_count == 1
         assert len(result.jobs) == 2

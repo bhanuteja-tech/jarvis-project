@@ -114,21 +114,15 @@ class TestUpsertJobs:
         assert [row.source_job_id for row in rows] == ["1", "2"]
         assert all(row.source == "greenhouse" for row in rows)
 
-    def test_identical_refetch_leaves_row_completely_untouched(
-        self, session_factory
-    ) -> None:
+    def test_identical_refetch_leaves_row_completely_untouched(self, session_factory) -> None:
         original = make_job("10")
 
         with session_factory() as session:
             upsert_jobs(session, [original])
-            before = (
-                session.query(JobORM).filter_by(source_job_id="10").one()
-            )
+            before = session.query(JobORM).filter_by(source_job_id="10").one()
             discovered_at, fetched_at = before.discovered_at, before.fetched_at
 
-        later_fetch = Job(
-            **original.model_dump(exclude={"id", "discovered_at", "fetched_at"})
-        )
+        later_fetch = Job(**original.model_dump(exclude={"id", "discovered_at", "fetched_at"}))
         assert later_fetch.fetched_at > fetched_at  # sanity: time moved on
 
         with session_factory() as session:
@@ -139,9 +133,7 @@ class TestUpsertJobs:
         assert after.discovered_at == discovered_at
         assert after.fetched_at == fetched_at  # untouched when nothing changed
 
-    def test_changed_content_updates_and_preserves_discovered_at(
-        self, session_factory
-    ) -> None:
+    def test_changed_content_updates_and_preserves_discovered_at(self, session_factory) -> None:
         original = make_job("20", title="Old Title")
 
         with session_factory() as session:
@@ -174,9 +166,7 @@ class TestUpsertJobs:
         assert after.discovered_at == original_discovered_at
         assert after.fetched_at > original_fetched_at
 
-    def test_database_enforces_source_identity_uniqueness(
-        self, session_factory
-    ) -> None:
+    def test_database_enforces_source_identity_uniqueness(self, session_factory) -> None:
         with session_factory() as session:
             session.add(
                 JobORM(

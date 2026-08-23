@@ -27,9 +27,7 @@ def make_gate(
     permissive: bool = False,
     attempts: int = 1,
 ) -> RobotsGate:
-    settings = make_settings(
-        career_robots_permissive=permissive, career_max_attempts=attempts
-    )
+    settings = make_settings(career_robots_permissive=permissive, career_max_attempts=attempts)
     fetcher = GuardedFetcher(
         settings,
         transport=httpx.MockTransport(router),
@@ -44,8 +42,7 @@ class TestVerdicts:
             httpx.Response(
                 200,
                 content=(
-                    b"User-agent: jarvis-job-discovery\nDisallow: /\n"
-                    "User-agent: *\nAllow: /\n"
+                    b"User-agent: jarvis-job-discovery\nDisallow: /\nUser-agent: *\nAllow: /\n"
                 ),
                 headers={"Content-Type": "text/plain"},
             )

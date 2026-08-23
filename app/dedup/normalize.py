@@ -19,12 +19,31 @@ _WS_RE = re.compile(r"\s+")
 _SEPARATORS_RE = re.compile(r"[-–—|/:]+")
 _PARENS_RE = re.compile(r"\([^()]*\)|\[[^\[\]]*\]")
 _WORD_RE = re.compile(r"[a-z]+")
+_TOKEN_RE = re.compile(r"[a-z0-9+#]+")
 
 _COMPANY_SUFFIXES: frozenset[str] = frozenset(
     {
-        "inc", "incorporated", "llc", "ltd", "limited", "gmbh", "corp",
-        "corporation", "co", "company", "plc", "sa", "nv", "ag", "kg",
-        "bv", "oy", "ab", "pte", "srl", "spa",
+        "inc",
+        "incorporated",
+        "llc",
+        "ltd",
+        "limited",
+        "gmbh",
+        "corp",
+        "corporation",
+        "co",
+        "company",
+        "plc",
+        "sa",
+        "nv",
+        "ag",
+        "kg",
+        "bv",
+        "oy",
+        "ab",
+        "pte",
+        "srl",
+        "spa",
     }
 )
 
@@ -38,10 +57,42 @@ _LOCATION_PHRASE_MAP: dict[str, str] = {
     "sf": "san francisco",
 }
 
-_REMOTE_TOKENS: frozenset[str] = frozenset(
-    {"remote", "telecommute", "wfh", "anywhere"}
-)
+_REMOTE_TOKENS: frozenset[str] = frozenset({"remote", "telecommute", "wfh", "anywhere"})
 _REMOTE_PHRASES: tuple[str, ...] = ("work from home",)
+
+# Generic English / resume-filler words that carry no evidentiary weight in
+# the truth guards (Phases 5 & 6). Tokens containing digits are NEVER
+# stopworded — invented metrics must always fail containment.
+INFORMATIVE_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "for",
+        "from", "has", "have", "in", "is", "it", "its", "of", "on", "or", "our",
+        "that", "the", "their", "this", "to", "was", "were", "will", "with",
+        "focused", "experienced", "skilled", "proficient", "passionate",
+        "dedicated", "results", "driven", "strong", "proven", "track",
+        "record", "work", "working", "worked", "role", "roles", "team",
+        "teams", "years", "experience", "including", "across", "using",
+        "used", "build", "building", "built", "developed", "developing",
+        "manage", "managed", "managing", "platform", "analytics", "led",
+        "users", "user", "production", "serving", "scale", "senior",
+        "junior", "lead", "leading", "engineer", "engineers", "various",
+        "multiple", "key", "core", "high", "quality", "new", "other",
+        "several", "well", "within", "without",
+    }
+)
+
+
+def informative_tokens(text: str) -> set[str]:
+    """Content-bearing lowercase tokens (stopwords removed).
+
+    Tokens containing digits are never in the stopword lexicon, so invented
+    metrics (``12 engineers``, ``1M users``) always survive as informative.
+    """
+    return {
+        token
+        for token in _TOKEN_RE.findall(text.lower())
+        if token not in INFORMATIVE_STOPWORDS
+    }
 
 
 def base_normalize(value: str) -> str:
@@ -107,7 +158,9 @@ def location_key(location: str | None) -> str | None:
 
 
 __all__ = [
+    "INFORMATIVE_STOPWORDS",
     "base_normalize",
+    "informative_tokens",
     "is_remote_location",
     "location_key",
     "normalize_company",

@@ -19,7 +19,21 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
 _BLOCK_TAGS = frozenset(
-    {"p", "div", "section", "article", "ul", "ol", "table", "tr", "hr", "br", "main", "header", "footer"}
+    {
+        "p",
+        "div",
+        "section",
+        "article",
+        "ul",
+        "ol",
+        "table",
+        "tr",
+        "hr",
+        "br",
+        "main",
+        "header",
+        "footer",
+    }
 )
 _HEADING_TAGS = {f"h{i}" for i in range(1, 7)}
 _SKIP_TAGS = frozenset({"script", "style"})
@@ -124,18 +138,27 @@ def extract_text_document(
     truncated = False
     total = sum(len(block.text) + 1 for block in builder.blocks)
 
+    # Split paragraph blocks on embedded newlines so plain-text JDs get
+    # per-line blocks (needed for heading detection).
+    raw_blocks: list[TextBlock] = []
+    for block in builder.blocks:
+        for line in block.text.split("\n"):
+            collapsed = _collapse_ws(line)
+            if collapsed:
+                raw_blocks.append(TextBlock(kind=block.kind, text=collapsed, level=block.level))
+        if not block.text.strip():
+            raw_blocks.append(block)
+
     blocks: list[TextBlock] = []
     used = 0
-    for block in builder.blocks:
+    for block in raw_blocks:
         text = _collapse_ws(block.text)
         if not text:
             continue
         if used + len(text) > max_chars:
             remaining = max_chars - used
             if remaining > 0:
-                blocks.append(
-                    TextBlock(kind=block.kind, text=text[:remaining], level=block.level)
-                )
+                blocks.append(TextBlock(kind=block.kind, text=text[:remaining], level=block.level))
             truncated = True
             break
         blocks.append(TextBlock(kind=block.kind, text=text, level=block.level))
@@ -151,31 +174,25 @@ def extract_text_document(
 
 
 def bullet_items(text: str) -> list[str]:
-    """Split a section's text into bullet-ish items when present."""
+    """Split section text into individual items.
+
+    Lines starting with bullet markers become their own items.
+    Other non-empty lines also become individual items (not joined).
+    """
     items: list[str] = []
-    current: list[str] = []
 
     def push(line: str) -> None:
         stripped = line.strip()
-        if not stripped:
-            return
         cleaned = stripped.lstrip("-•*·–—").strip()
-        cleaned = _strip_numbering(cleaned)
-        if cleaned:
+        cleaned = _NUMBERED.sub("", cleaned).strip()
+        if len(cleaned) >= 3:
             items.append(cleaned)
 
     for raw_line in text.split("\n"):
         line = raw_line.strip()
-        if line.startswith(("-", "•", "*", "·")) or _NUMBERED.match(line):
-            if current:
-                push(" ".join(current))
-                current = []
-            current.append(line)
-        elif line:
-            current.append(line)
-    if current:
-        push(" ".join(current))
-    return [item for item in items if len(item) >= 3]
+        if line:
+            push(line)
+    return items
 
 
 _NUMBERED = re.compile(r"^\d{1,2}[.)]\s")

@@ -39,7 +39,9 @@ from app.jdunderstanding.models import (
     ExtractionStatus,
     JDAnalysis,
     QualificationItem,
+    QualificationsField,
     RequirementLevel,
+    ResponsibilitiesField,
     ResponsibilityItem,
     RoleInfo,
     SectionKind,
@@ -52,8 +54,13 @@ from app.jdunderstanding.text import bullet_items, extract_text_document
 
 logger = logging.getLogger(__name__)
 
-_WORK_MODE_WORDS = (("remote", "remote"), ("hybrid", "hybrid"), ("on-site", "onsite"),
-                    ("onsite", "onsite"), ("work from home", "remote"))
+_WORK_MODE_WORDS = (
+    ("remote", "remote"),
+    ("hybrid", "hybrid"),
+    ("on-site", "onsite"),
+    ("onsite", "onsite"),
+    ("work from home", "remote"),
+)
 
 
 def build_analyzer(settings: Settings, *, llm_client: JdLlmClient | None = None) -> JDAnalyzer:
@@ -88,8 +95,11 @@ class JDAnalyzer:
             index_value = wrapper.get("job_index")
             if not isinstance(index_value, int) or not (0 <= index_value < len(jobs)):
                 results.append(
-                    AnalysisResult(status="SKIPPED", job_index=-1,
-                                   reason="ranked wrapper missing valid job_index")
+                    AnalysisResult(
+                        status="SKIPPED",
+                        job_index=-1,
+                        reason="ranked wrapper missing valid job_index",
+                    )
                 )
                 continue
             results.append(await self.analyze_job(jobs[index_value], index_value))
@@ -139,13 +149,9 @@ class JDAnalyzer:
             )
 
         raw_html = "\n".join(raw_candidates)
-        document = extract_text_document(
-            raw_html, max_chars=self._settings.jd_max_chars
-        )
+        document = extract_text_document(raw_html, max_chars=self._settings.jd_max_chars)
         if document.truncated:
-            warnings.append(
-                f"jd truncated to {self._settings.jd_max_chars} characters"
-            )
+            warnings.append(f"jd truncated to {self._settings.jd_max_chars} characters")
 
         segmentation = segment_document(document)
 
@@ -157,7 +163,6 @@ class JDAnalyzer:
         certification_items = extract_certifications(document.plain_text)
         salary_field = build_salary_field(job.get("salary"), document.plain_text)
 
-        sections_found = sorted({s.kind.value for s in segmentation.sections})
         role_title = job.get("title") if isinstance(job.get("title"), str) else None
 
         work_arrangement, arrangement_warnings = _work_arrangement(job, document.plain_text)
@@ -180,7 +185,11 @@ class JDAnalyzer:
                         )
                     )
         requirements_section = next(
-            (s for s in segmentation.sections if s.kind in (SectionKind.REQUIREMENTS, SectionKind.QUALIFICATIONS)),
+            (
+                s
+                for s in segmentation.sections
+                if s.kind in (SectionKind.REQUIREMENTS, SectionKind.QUALIFICATIONS)
+            ),
             None,
         )
         if requirements_section is not None:
@@ -197,7 +206,8 @@ class JDAnalyzer:
                         evidence=Evidence(
                             text=item[:200],
                             field=(
-                                f"section:{requirements_section.label or requirements_section.kind.value}"
+                                "section:"
+                                + (requirements_section.label or requirements_section.kind.value)
                             ),
                             confidence=Confidence.HIGH,
                         ),
@@ -210,7 +220,9 @@ class JDAnalyzer:
             role=RoleInfo(
                 title_as_posted=role_title,
                 evidence=Evidence(text=role_title or "", field="job.title"),
-            ) if role_title else RoleInfo(),
+            )
+            if role_title
+            else RoleInfo(),
             seniority=SeniorityField(),
             skills=SkillsField(
                 status=(
@@ -231,28 +243,20 @@ class JDAnalyzer:
             ),
             qualifications=QualificationsField(
                 status=(
-                    ExtractionStatus.EXPLICIT
-                    if qualifications_items
-                    else ExtractionStatus.UNKNOWN
+                    ExtractionStatus.EXPLICIT if qualifications_items else ExtractionStatus.UNKNOWN
                 ),
                 items=qualifications_items,
             ),
-            experience=(
-                experience
-                if experience is not None
-                else _unknown_experience()
-            ),
+            experience=(experience if experience is not None else _unknown_experience()),
             education=_education_field(education_items),
             employment_type=_employment_info(job),
             work_arrangement=work_arrangement,
             location=_location_info(job),
             salary=salary_field,
             certifications=_certification_field(certification_items),
-            domain_terms=[
-                item.term
-                for item in keyword_items
-                if item.category.value == "concept"
-            ][:12],
+            domain_terms=[item.term for item in keyword_items if item.category.value == "concept"][
+                :12
+            ],
             keywords=_keywords_field(keyword_items),
             coverage=_coverage(segmentation, document),
             extraction_meta=_meta(document, llm_used=False, started=started),
@@ -313,7 +317,7 @@ class JDAnalyzer:
                 for skill in (*analysis.skills.required, *analysis.skills.preferred)
             )
             if not already:
-                from app.jdunderstanding.models import SkillRequirement, SkillCategory
+                from app.jdunderstanding.models import SkillCategory, SkillRequirement
 
                 analysis.skills.preferred.append(
                     SkillRequirement(
@@ -380,7 +384,12 @@ def _work_arrangement(
 
     mode: str | None = None
     evidence_span: str | None = None
-    if isinstance(workplace, str) and workplace.strip().lower() in {"remote", "hybrid", "onsite", "on-site"}:
+    if isinstance(workplace, str) and workplace.strip().lower() in {
+        "remote",
+        "hybrid",
+        "onsite",
+        "on-site",
+    }:
         normalized = workplace.strip().lower()
         mode = "onsite" if normalized == "on-site" else normalized
         evidence_span = workplace
@@ -394,7 +403,7 @@ def _work_arrangement(
                 position = lowered.find(word)
                 if position >= 0:
                     mode = canonical_mode
-                    evidence_span = plain_text[position: position + len(word)]
+                    evidence_span = plain_text[position : position + len(word)]
                     break
 
     if mode is None or evidence_span is None:
@@ -404,9 +413,7 @@ def _work_arrangement(
         WorkArrangementInfo(
             mode=mode,  # type: ignore[arg-type]
             status=ExtractionStatus.EXPLICIT,
-            evidence=[
-                Evidence(text=evidence_span, field="job.description")
-            ],
+            evidence=[Evidence(text=evidence_span, field="job.description")],
         ),
         [],
     )

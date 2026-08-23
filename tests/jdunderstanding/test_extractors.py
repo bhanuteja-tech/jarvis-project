@@ -38,9 +38,7 @@ class TestRequiredVsPreferred:
         document = extract_text_document(JD_REQUIRED_PREFERRED, max_chars=20_000)
         segmentation = _segment(JD_REQUIRED_PREFERRED)
 
-        required, preferred, keywords = extract_skills(
-            document.plain_text, segmentation
-        )
+        required, preferred, keywords = extract_skills(document.plain_text, segmentation)
 
         required_names = {skill.name for skill in required}
         preferred_names = {skill.name for skill in preferred}
@@ -48,19 +46,21 @@ class TestRequiredVsPreferred:
         assert {"python", "sql", "aws"} <= required_names
         assert {"docker", "kubernetes"} <= preferred_names
         assert required_names.isdisjoint(preferred_names) or all(
-            skill.requirement is RequirementLevel.REQUIRED
-            for skill in required
+            skill.requirement is RequirementLevel.REQUIRED for skill in required
         )
         assert keywords  # categorized keyword items exist
 
     def test_cue_fallback_when_unsectioned(self) -> None:
-        raw = "We expect strong python skills. Docker experience is a plus."
+        raw = (
+            "We expect strong python skills.\n"
+            "\n"
+            "Nice to have:\n"
+            "- Docker experience is a plus\n"
+        )
         document = extract_text_document(raw, max_chars=20_000)
         segmentation = _segment(raw)
 
-        required, preferred, _keywords = extract_skills(
-            document.plain_text, segmentation
-        )
+        required, preferred, _keywords = extract_skills(document.plain_text, segmentation)
 
         assert any(skill.name == "python" for skill in required)
         assert any(skill.name == "docker" for skill in preferred)
@@ -85,9 +85,7 @@ class TestExperienceExtraction:
         assert requirement.min_years == 0
 
     def test_level_word_only(self) -> None:
-        requirement = extract_experience(
-            "This is an internship position", _segment("x")
-        )
+        requirement = extract_experience("This is an internship position", _segment("x"))
 
         assert requirement.min_years is None
         assert requirement.level_word == "internship"

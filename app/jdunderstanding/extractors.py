@@ -8,7 +8,6 @@ structured when an unambiguous currency-anchored pattern matches.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Any
 
 from app.jdunderstanding.models import (
@@ -19,9 +18,7 @@ from app.jdunderstanding.models import (
     ExperienceRequirement,
     ExtractionStatus,
     KeywordItem,
-    QualificationItem,
     RequirementLevel,
-    ResponsibilityItem,
     SalaryField,
     SalaryParsed,
     SectionKind,
@@ -30,7 +27,6 @@ from app.jdunderstanding.models import (
 )
 from app.jdunderstanding.sections import Segmentation
 from app.jdunderstanding.taxonomy import find_skill_hits
-from app.jdunderstanding.text import bullet_items
 
 # ---------------------------------------------------------------------------
 # Skills
@@ -50,10 +46,11 @@ def _requirement_for_section(kind: SectionKind) -> RequirementLevel:
 
 def _cue_level(sentence: str) -> RequirementLevel | None:
     lowered = sentence.lower()
-    if any(cue in lowered for cue in _PREFERRED_CUES):
-        return RequirementLevel.PREFERRED
+    # Required cues take precedence over preferred cues when both appear.
     if any(cue in lowered for cue in _REQUIRED_CUES):
         return RequirementLevel.REQUIRED
+    if any(cue in lowered for cue in _PREFERRED_CUES):
+        return RequirementLevel.PREFERRED
     return None
 
 
@@ -79,9 +76,7 @@ def extract_skills(
         # REQUIRED wins precedence; UNKNOWN requirements are recorded under
         # preferred with explicit level=unknown so they stay visible without
         # inflating required-skill matching later.
-        bucket = (
-            required_by_name if level is RequirementLevel.REQUIRED else preferred_by_name
-        )
+        bucket = required_by_name if level is RequirementLevel.REQUIRED else preferred_by_name
         existing = bucket.get(canonical)
         evidence = Evidence(
             text=span.strip(),
@@ -113,13 +108,11 @@ def extract_skills(
             continue
         base_level = _requirement_for_section(section.kind)
         confidence = (
-            Confidence.HIGH
-            if base_level is not RequirementLevel.UNKNOWN
-            else Confidence.MEDIUM
+            Confidence.HIGH if base_level is not RequirementLevel.UNKNOWN else Confidence.MEDIUM
         )
         hits = find_skill_hits(section_text)
         for hit in hits:
-            span = section_text[max(0, hit.start - 40): hit.end + 40]
+            span = section_text[max(0, hit.start - 40) : hit.end + 40]
             line = section.line_start + section_text.count("\n", 0, hit.start) + 1
             level = base_level
             if level is RequirementLevel.UNKNOWN:
@@ -142,7 +135,7 @@ def extract_skills(
     for hit in find_skill_hits(document_text):
         if hit.canonical in known_names:
             continue
-        span = document_text[max(0, hit.start - 40): hit.end + 40]
+        span = document_text[max(0, hit.start - 40) : hit.end + 40]
         cue = _cue_level(span)
         level = cue if cue is not None else RequirementLevel.UNKNOWN
         add_hit(
@@ -171,16 +164,24 @@ _RANGE_RE = re.compile(
     re.IGNORECASE,
 )
 _SINGLE_RE = re.compile(r"(?P<n>\d{1,2})\s*\+?\s*years?", re.IGNORECASE)
-_LEVEL_WORDS = ("senior-level", "entry-level", "junior-level", "fresh graduate",
-                "internship", "mid-level")
+_LEVEL_WORDS = (
+    "senior-level",
+    "entry-level",
+    "junior-level",
+    "fresh graduate",
+    "internship",
+    "mid-level",
+)
 
 _EDUCATION_RE = re.compile(
-    r"\b(bachelor(?:'s)?|master(?:'s)?|phd|doctorate|associate)(?:\s+degree)?"
-    r"(?:[^.\n]{0,60}?\b(?:in|of)\s+)(?P<field>[A-Z][A-Za-z &/]{2,40})",
+    r"\b(?P<deg>bachelor(?:'s)?|master(?:'s)?|phd|doctorate|associate)(?:\s+degree)?"
+    r"(?:[^.\n]{0,60}?\bin\s+(?P<field>[A-Z][A-Za-z &/]{2,40}))?",
+    re.IGNORECASE,
 )
 
 _BARE_DEGREE_RE = re.compile(
-    r"\b(?P<degree>bachelor(?:'s)?|master(?:'s)?|phd|doctorate|associate)\s+degree\b",
+    r"\b(?P<degree>bachelor(?:'s)?\s+degree|master(?:'s)?\s+degree|"
+    r"bachelor(?:'s)?|master(?:'s)?|phd|doctorate|associate)\b",
     re.IGNORECASE,
 )
 
@@ -202,7 +203,8 @@ def extract_experience(
     experience_sections = [
         section.text
         for section in segmentation.sections
-        if section.kind in (SectionKind.EXPERIENCE, SectionKind.REQUIREMENTS, SectionKind.QUALIFICATIONS)
+        if section.kind
+        in (SectionKind.EXPERIENCE, SectionKind.REQUIREMENTS, SectionKind.QUALIFICATIONS)
     ]
     search_order = [*experience_sections, document_text]
 
@@ -214,9 +216,7 @@ def extract_experience(
                 max_years=int(match.group("max")),
                 raw=match.group(0),
                 status=ExtractionStatus.EXPLICIT,
-                evidence=[
-                    Evidence(text=match.group(0), field="section:experience")
-                ],
+                evidence=[Evidence(text=match.group(0), field="section:experience")],
             )
     for candidate_text in search_order:
         match = _SINGLE_RE.search(candidate_text)
@@ -248,16 +248,20 @@ def extract_education(
     education_sections = [
         section.text
         for section in segmentation.sections
-        if section.kind in (SectionKind.EDUCATION, SectionKind.REQUIREMENTS, SectionKind.QUALIFICATIONS)
+        if section.kind
+        in (SectionKind.EDUCATION, SectionKind.REQUIREMENTS, SectionKind.QUALIFICATIONS)
     ]
     search_texts = [*education_sections, document_text]
     seen_fields: set[str] = set()
 
     for candidate_text in search_texts:
         for match in _EDUCATION_RE.finditer(candidate_text):
-            degree = match.group(1).lower()
-            field_of_study = match.group("field").strip().rstrip(" .,;")
-            key = f"{degree}:{field_of_study.lower()}"
+            degree = match.group("deg").lower()
+            field_of_study = (
+                match.group("field").strip().rstrip(" .,;")
+                if match.group("field") else None
+            )
+            key = f"{degree}:{(field_of_study or '').lower()}"
             if key in seen_fields:
                 continue
             seen_fields.add(key)
@@ -265,9 +269,7 @@ def extract_education(
                 EducationItem(
                     degree=degree,
                     field_of_study=field_of_study,
-                    evidence=Evidence(
-                        text=match.group(0).strip(), field="section:education"
-                    ),
+                    evidence=Evidence(text=match.group(0).strip(), field="section:education"),
                 )
             )
         if items:
@@ -285,9 +287,7 @@ def extract_education(
                     EducationItem(
                         degree=degree,
                         field_of_study=None,
-                        evidence=Evidence(
-                            text=match.group(0), field="job.description"
-                        ),
+                        evidence=Evidence(text=match.group(0), field="job.description"),
                     )
                 )
             if items:
@@ -323,7 +323,13 @@ _MONEY_RE = re.compile(
     r"(?:\s?[-–—to]+\s?(?P<cur2>[$€£₹])?\s?(?P<b>\d{1,3}(?:[,.]\d{3})*|\d+(?:\.\d+)?)\s?k?)?",
     re.IGNORECASE,
 )
-_PERIOD_HINTS = (("year", "year"), ("annum", "year"), ("hr", "hour"), ("hour", "hour"), ("month", "month"))
+_PERIOD_HINTS = (
+    ("year", "year"),
+    ("annum", "year"),
+    ("hr", "hour"),
+    ("hour", "hour"),
+    ("month", "month"),
+)
 
 
 def _money_value(raw_number: str) -> float | None:
@@ -345,21 +351,25 @@ def parse_salary_span(match: re.Match[str]) -> SalaryParsed:
     def convert(raw: str | None) -> float | None:
         if raw is None:
             return None
-        value = _money_value(raw)
-        if value is not None and raw.lower().endswith("k") is False and "k" in raw.lower():
-            pass
-        return value
+        return _money_value(raw)
 
     minimum = convert(low_raw)
     maximum = convert(high_raw) if high_raw else None
     if maximum is not None and minimum is not None and maximum < minimum:
         minimum, maximum = maximum, minimum
+
+    matched_text = match.group(0).lower()
     period = None
-    tail_window = match.string[match.end(): match.end() + 24].lower()
     for hint, canonical_period in _PERIOD_HINTS:
-        if hint in tail_window:
+        if hint in matched_text:
             period = canonical_period
             break
+    if period is None:
+        tail_window = match.string[match.end():match.end() + 30].lower()
+        for hint, canonical_period in _PERIOD_HINTS:
+            if hint in tail_window:
+                period = canonical_period
+                break
     return SalaryParsed(min=minimum, max=maximum, currency=currency, period=period)
 
 

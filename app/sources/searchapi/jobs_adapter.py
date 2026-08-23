@@ -70,9 +70,7 @@ def extract_htidocid(sharing_link: str | None) -> str | None:
     return values[0].strip() or None
 
 
-def derive_fallback_id(
-    *, company_name: str | None, title: str | None, location: str | None
-) -> str:
+def derive_fallback_id(*, company_name: str | None, title: str | None, location: str | None) -> str:
     """Deterministic content identity: stable across identical searches."""
     material = "|".join(
         (
@@ -90,9 +88,7 @@ def resolve_source_job_id(job: GoogleJobsJob) -> tuple[str, str]:
     if htidocid:
         return f"gj:{htidocid}", "htidocid"
     return (
-        derive_fallback_id(
-            company_name=job.company_name, title=job.title, location=job.location
-        ),
+        derive_fallback_id(company_name=job.company_name, title=job.title, location=job.location),
         "derived",
     )
 
@@ -132,9 +128,7 @@ def normalize_job(job: GoogleJobsJob, *, query: str) -> Job:
     detected = job.detected_extensions or {}
 
     schedule = detected.get("schedule")
-    employment_type = (
-        _blank_to_none(schedule) if isinstance(schedule, str) else None
-    )
+    employment_type = _blank_to_none(schedule) if isinstance(schedule, str) else None
     posted_at = detected.get("posted_at")
 
     extra = {
@@ -147,9 +141,7 @@ def normalize_job(job: GoogleJobsJob, *, query: str) -> Job:
         "extensions": job.extensions,
         "detected_extensions": job.detected_extensions,
         "job_highlights": (
-            [item.model_dump() for item in job.job_highlights]
-            if job.job_highlights
-            else None
+            [item.model_dump() for item in job.job_highlights] if job.job_highlights else None
         ),
         "apply_links": (
             [item.model_dump() for item in job.apply_links] if job.apply_links else None
@@ -287,8 +279,7 @@ class GoogleJobsAdapter:
 
             next_token = (
                 response.pagination.next_page_token.strip()
-                if response.pagination is not None
-                and response.pagination.next_page_token
+                if response.pagination is not None and response.pagination.next_page_token
                 else None
             )
             if not next_token:
@@ -328,9 +319,7 @@ class GoogleJobsAdapter:
                 "pages_fetched": pages,
                 "raw_count": raw_count,
                 "jobs_normalized": len(jobs),
-                "items_skipped": sum(
-                    1 for w in warnings if w.code == "normalization_failed"
-                ),
+                "items_skipped": sum(1 for w in warnings if w.code == "normalization_failed"),
             },
         )
         return FetchResult(

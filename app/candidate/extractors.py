@@ -26,15 +26,18 @@ from app.candidate.models import (
     SkillsField,
 )
 from app.jdunderstanding.models import Confidence, Evidence, ExtractionStatus
-from app.jdunderstanding.taxonomy import SkillHit, find_skill_hits
-from app.ranking.preferences import EmploymentType, normalize_employment
+from app.jdunderstanding.taxonomy import find_skill_hits
+from app.ranking.preferences import EmploymentType
 
 # ---------------------------------------------------------------------------
 # Contact / PII (quarantined)
 # ---------------------------------------------------------------------------
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-_PHONE_RE = re.compile(r"(?:\+?\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)[\s.-]?)?\d{3}[\s.-]?\d{3,4}(?:[\s.-]?\d{2,4})?")
+_PHONE_RE = re.compile(
+    r"(?:\+?\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)[\s.-]?)?"
+    r"\d{3}[\s.-]?\d{3,4}(?:[\s.-]?\d{2,4})?"
+)
 _URL_RE = re.compile(r"https?://[^\s)>\]]+", re.IGNORECASE)
 
 
@@ -60,10 +63,15 @@ def extract_contact(text: str) -> tuple[list[str], list[str], list[Any], list[Ev
     links: list[Any] = []
     for url in list(dict.fromkeys(m.group(0).rstrip(".,;") for m in _URL_RE.finditer(text)))[:6]:
         links.append(LinkItem(label=_link_label(url), url=url))
-    evidence = [
-        Evidence(text="contact details extracted", field="resume.contact",
-                 confidence=Confidence.HIGH)
-    ] if (emails or phones or links) else []
+    evidence = (
+        [
+            Evidence(
+                text="contact details extracted", field="resume.contact", confidence=Confidence.HIGH
+            )
+        ]
+        if (emails or phones or links)
+        else []
+    )
     return emails, phones, links, evidence
 
 
@@ -85,9 +93,7 @@ def extract_identity(document_lines: list[str]) -> tuple[str | None, Evidence | 
             continue
         if sum(ch.isalpha() for ch in candidate) < len(candidate) * 0.6:
             continue
-        evidence = Evidence(
-            text=candidate, field="resume.header", confidence=Confidence.MEDIUM
-        )
+        evidence = Evidence(text=candidate, field="resume.header", confidence=Confidence.MEDIUM)
         return candidate, evidence
     return None, None
 
@@ -97,8 +103,18 @@ def extract_identity(document_lines: list[str]) -> tuple[str | None, Evidence | 
 # ---------------------------------------------------------------------------
 
 _MONTHS = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
     "sept": 9,
 }
 _DATE_TOKEN = r"(?:[A-Za-z]{3,9}\.?,?\s*\d{4}|\d{1,2}/\d{4}|\d{4})"
@@ -143,6 +159,10 @@ class _RawEntry:
     body_lines: list[str]
 
 
+def _is_bullet_line(line: str) -> bool:
+    return bool(re.match(r"^[-•*·–—]\s+", line))
+
+
 def _split_experience_entries(section_text: str) -> list[_RawEntry]:
     lines = section_text.split("\n")
     entries: list[_RawEntry] = []
@@ -159,31 +179,54 @@ def _split_experience_entries(section_text: str) -> list[_RawEntry]:
 
     for line in lines:
         stripped = line.strip()
-        match = _DATE_RANGE_RE.search(stripped)
-        if match is None:
-            if current is None:
-                pending_header.append(stripped) if stripped else None
-            else:
-                current.body_lines.append(stripped)
+        if not stripped:
             continue
+        match = _DATE_RANGE_RE.search(stripped)
+        if match is not None:
+            if current is not None:
+                entries.append(current)
+                current = None
+            current = close_pending_into(
+                _RawEntry(
+                    header_line="",
+                    date_span_text=match.group(0),
+                    start_token=match.group("start"),
+                    end_token=match.group("end"),
+                    body_lines=[],
+                )
+            )
+            trailing = stripped[match.end() :].strip(" \t–—-|")
+            if trailing:
+                current.body_lines.append(trailing)
+            continue
+        if _is_bullet_line(stripped):
+            if current is not None:
+                current.body_lines.append(stripped)
+            else:
+                pending_header.append(stripped)
+            continue
+        # Non-bullet prose line: either the next role's header or body text.
         if current is not None:
             entries.append(current)
-        current = close_pending_into(
-            _RawEntry(
-                header_line="",
-                date_span_text=match.group(0),
-                start_token=match.group("start"),
-                end_token=match.group("end"),
-                body_lines=[],
-            )
-        )
-        trailing = stripped[match.end():].strip(" \t–—-|")
-        if trailing:
-            current.body_lines.append(trailing)
+            current = None
+        pending_header.append(stripped)
+
     if current is not None:
         entries.append(current)
     elif pending_header:
-        pass
+        # Trailing role block without any explicit dates stays an item whose
+        # dates remain UNKNOWN (never invented).
+        entries.append(
+            close_pending_into(
+                _RawEntry(
+                    header_line="",
+                    date_span_text="",
+                    start_token="",
+                    end_token="",
+                    body_lines=[],
+                )
+            )
+        )
     return entries
 
 
@@ -219,7 +262,8 @@ def extract_experience_field(
             location: str | None = None
             highlights: list[str] = []
             for line in body:
-                if line.lower().startswith(("remote", "hybrid", "onsite", "on-site")) and len(line) < 40:
+                is_loc = line.lower().startswith(("remote", "hybrid", "onsite", "on-site"))
+                if is_loc and len(line) < 40:
                     location = line
                     continue
                 cleaned = line.lstrip("-•*·–— ").strip()
@@ -234,7 +278,8 @@ def extract_experience_field(
             end_iso = end_iso_token
             is_current = end_is_present or start_current
             if end_iso is None and is_current:
-                end_iso = reference.date().isoformat()
+                # Month precision for open-ended roles: first of the month.
+                end_iso = reference.date().replace(day=1).isoformat()
 
             duration: int | None = None
             if start_iso is not None and end_iso is not None:
@@ -275,10 +320,24 @@ def extract_experience_field(
 # ---------------------------------------------------------------------------
 
 
+def _evidence_span(text: str, start: int, end: int, *, context: int = 30) -> str:
+    """Context window clamped to the hit's own line — evidence must never
+    sweep contact PII (emails, phones) in from adjacent resume lines."""
+    left = max(0, start - context)
+    right = min(len(text), end + context)
+    newline_left = text.rfind("\n", left, start)
+    if newline_left != -1:
+        left = newline_left + 1
+    newline_right = text.find("\n", end, right)
+    if newline_right != -1:
+        right = newline_right
+    return text[left:right].strip()
+
+
 def _skills_from_text(text: str) -> list[CandidateSkill]:
     skills: dict[str, CandidateSkill] = {}
     for hit in find_skill_hits(text):
-        span = text[max(0, hit.start - 30): hit.end + 30].strip()
+        span = _evidence_span(text, hit.start, hit.end)
         key = hit.canonical
         if key in skills:
             skills[key].evidence.append(
@@ -289,9 +348,7 @@ def _skills_from_text(text: str) -> list[CandidateSkill]:
             name=hit.canonical,
             matched_as=hit.matched_as,
             category=hit.category.value,
-            evidence=[
-                Evidence(text=span, field="resume.skills", confidence=Confidence.MEDIUM)
-            ],
+            evidence=[Evidence(text=span, field="resume.skills", confidence=Confidence.MEDIUM)],
         )
     return list(skills.values())
 
@@ -341,13 +398,11 @@ _EDUCATION_LINE_RE = re.compile(
     r"(?P<deg>phd|doctorate|mphil|masters?|msc|meng|mba|bachelors?|bsc|beng|btech|bs|ba|associate|aas|diploma|bootcamp)",
     re.IGNORECASE,
 )
-_FIELD_RE = re.compile(
-    r"(?:\bin\b|\bof\b)\s+(?P<field>[A-Z][A-Za-z&/ ]{2,48})", re.IGNORECASE
-)
+_FIELD_RE = re.compile(r"(?:\bin\b|\bof\b)\s+(?P<field>[A-Z][A-Za-z&/ ]{2,48})", re.IGNORECASE)
 _INSTITUTION_RE = re.compile(
     r"\b(?P<inst>[A-Z][\w.&' ]{2,60}?(?:University|College|Institute|School|Academy|Polytechnic))\b"
 )
-_YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 
 
 def extract_education_items(segmentation, full_text: str) -> list[EducationItem]:
@@ -370,15 +425,14 @@ def extract_education_items(segmentation, full_text: str) -> list[EducationItem]
 
             field_match = _FIELD_RE.search(line)
             field_of_study = (
-                field_match.group("field").strip().rstrip(",.;")
-                if field_match
-                else None
+                field_match.group("field").strip().rstrip(",.;") if field_match else None
             )
             institution_match = _INSTITUTION_RE.search(line)
             years = [int(y) for y in _YEAR_RE.findall(line)]
             graduation_year = max(years) if years else None
 
-            key = f"{canonical}:{(field_of_study or '').lower()}:{institution_match.group('inst').lower() if institution_match else ''}"
+            inst_lower = institution_match.group("inst").lower() if institution_match else ""
+            key = f"{canonical}:{(field_of_study or '').lower()}:{inst_lower}"
             if key in seen:
                 continue
             seen.add(key)
@@ -388,9 +442,7 @@ def extract_education_items(segmentation, full_text: str) -> list[EducationItem]
                     degree_raw=degree_raw,
                     field_of_study=field_of_study,
                     institution=(
-                        institution_match.group("inst").strip()
-                        if institution_match
-                        else None
+                        institution_match.group("inst").strip() if institution_match else None
                     ),
                     graduation_year=graduation_year,
                     evidence=Evidence(
@@ -437,7 +489,7 @@ def extract_certification_items(full_text: str) -> list[CertificationItem]:
                 CertificationItem(
                     name=display,
                     evidence=Evidence(
-                        text=full_text[position:position + len(needle)],
+                        text=full_text[position : position + len(needle)],
                         field="resume.certifications",
                         confidence=Confidence.HIGH,
                     ),
@@ -458,30 +510,69 @@ def extract_project_items(segmentation) -> list[ProjectItem]:
     if section is None:
         return []
     items: list[ProjectItem] = []
-    for block in section.blocks:
-        lines = [line.strip() for line in block.text.split("\n") if line.strip()]
-        if not lines:
-            continue
-        name = lines[0].lstrip("-•*·–— ").strip()
-        description = " ".join(lines[1:]).strip() or None
-        url = None
-        url_match = _URL_RE.search(block.text)
-        if url_match is not None:
-            url = url_match.group(0)
-            description = (description or "").replace(url, "").strip() or None
-        technologies = _skills_from_text(block.text)
+    current: dict[str, Any] | None = None
+
+    def _finalize() -> None:
+        nonlocal current
+        if current is None:
+            return
         items.append(
             ProjectItem(
-                name=name or None,
-                description=description,
-                url=url,
-                technologies=technologies,
+                name=current["name"] or None,
+                description=current["description"],
+                url=current["url"],
+                technologies=_skills_from_text(current["text"]),
                 evidence=Evidence(
-                    text=name[:120], field="resume.projects", confidence=Confidence.HIGH
+                    text=(current["name"] or "")[:120],
+                    field="resume.projects",
+                    confidence=Confidence.HIGH,
                 ),
             )
         )
-    return items
+        current = None
+
+    for block in section.blocks:
+        for raw_line in block.text.split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            is_bullet = bool(re.match(r"^[-•*·–—]\s+", line))
+            if not is_bullet:
+                # A non-bullet line starts a new project entry.
+                _finalize()
+                current = {
+                    "name": line.lstrip("-•*·–— ").strip(),
+                    "description": None,
+                    "url": None,
+                    "text": line,
+                }
+            else:
+                content = re.sub(r"^[-•*·–—]\s+", "", line)
+                if current is None:
+                    current = {
+                        "name": content,
+                        "description": None,
+                        "url": None,
+                        "text": line,
+                    }
+                else:
+                    current["description"] = (
+                        (current["description"] + " " if current["description"] else "")
+                        + content
+                    ).strip() or None
+                    current["text"] += "\n" + line
+        url_match = _URL_RE.search(block.text)
+        if url_match is not None and current is not None:
+            found_url = url_match.group(0)
+            if current["url"] is None:
+                current["url"] = found_url
+            current["description"] = (
+                current["description"].replace(found_url, "").strip()
+                if current["description"]
+                else None
+            )
+    _finalize()
+    return [item for item in items if item.name or item.description or item.url]
 
 
 # ---------------------------------------------------------------------------
@@ -490,8 +581,7 @@ def extract_project_items(segmentation) -> list[ProjectItem]:
 
 _PREF_CUES = {
     "relocation": ("willing to relocate", "open to relocation", "ready to relocate"),
-    "remote": ("open to remote", "seeking remote", "remote work preferred",
-               "interested in remote"),
+    "remote": ("open to remote", "seeking remote", "remote work preferred", "interested in remote"),
 }
 
 
@@ -512,19 +602,18 @@ def extract_preferences(full_text: str) -> PreferencesInfo:
         pattern = rf"(?:seeking|looking for|interested in)\s+(?:an?\s+)?{re.escape(token)}"
         if re.search(pattern, lowered):
             info.employment_types.append(employment_type.value)
-            evidence.append(
-                Evidence(text=f"seeking {token}", field="resume.preferences")
-            )
+            evidence.append(Evidence(text=f"seeking {token}", field="resume.preferences"))
 
-    location_match = re.search(
-        r"preferred locations?\s*[:\-]\s*(?P<locs>[^\n]+)", lowered
-    )
+    location_match = re.search(r"preferred locations?\s*[:\-]\s*(?P<locs>[^\n]+)", lowered)
     if location_match:
-        info.locations = [
-            part.strip().title()
-            for part in location_match.group("locs").split(",")
-            if part.strip()
-        ][:6]
+        info.locations = []
+        for part in location_match.group("locs").split(","):
+            # Stop at the next sentence / labelled field so trailing prose
+            # ("Amsterdam. Expected salary: ...") never becomes a location.
+            fragment = re.split(r"\.(?:\s|$)", part.strip())[0].strip()
+            if fragment and not re.search(r"[:\d]", fragment):
+                info.locations.append(fragment.title())
+        info.locations = info.locations[:6]
 
     salary_match = re.search(
         r"(?:expected salary|salary expectation)s?\s*[:\-]?\s*"
@@ -540,7 +629,11 @@ def extract_preferences(full_text: str) -> PreferencesInfo:
             currency_map = {"$": "USD", "€": "EUR", "£": "GBP", "₹": "INR"}
             info.salary_min = SalaryPreference(
                 amount=amount,
-                currency=currency_map.get(salary_match.group("cur")) if salary_match.group("cur") else None,
+                currency=(
+                    currency_map.get(salary_match.group("cur"))
+                    if salary_match.group("cur")
+                    else None
+                ),
             )
             evidence.append(
                 Evidence(

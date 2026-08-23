@@ -10,7 +10,6 @@ from app.tailoring.validator import (
     validate_rewrite,
 )
 
-
 CORPUS = [
     "Built python data pipelines",
     "Managed postgres cluster",
@@ -34,9 +33,9 @@ class TestTokenSubsetGuard:
         "text",
         [
             "Experienced with pytorch and kubernetes",
-            "Led a team of 12 engineers",           # invented metric
-            "Serving 1M users in production",        # invented scale
-            "Senior Machine Learning Engineer",      # title never evidenced
+            "Led a team of 12 engineers",  # invented metric
+            "Serving 1M users in production",  # invented scale
+            "Senior Machine Learning Engineer",  # title never evidenced
         ],
     )
     def test_fabricated_content_rejected(self, text: str) -> None:

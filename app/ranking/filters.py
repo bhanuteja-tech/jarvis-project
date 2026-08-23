@@ -35,9 +35,7 @@ def apply_hard_filters(
         if features.company_key and features.company_key == excluded_key:
             return FilterOutcome(False, "excluded_company", _gaps(gaps))
 
-    haystack_text = " ".join(
-        token for part in features.skill_parts for token in part.tokens
-    )
+    haystack_text = " ".join(token for part in features.skill_parts for token in part.tokens)
     for keyword in hard.exclude_keywords:
         pattern = r"\b" + re.escape(base_normalize(keyword).replace(" ", r"\b ")) + r"\b"
         if re.search(pattern, haystack_text):
@@ -47,9 +45,7 @@ def apply_hard_filters(
         if not features.location_known:
             gaps.append("location")
         else:
-            requested_keys = {
-                base_normalize(location) for location in hard.locations
-            }
+            requested_keys = {base_normalize(location) for location in hard.locations}
             job_key = features.location_key or ""
             job_key_normalized = base_normalize(job_key)
             matched = any(
@@ -58,16 +54,12 @@ def apply_hard_filters(
             )
             # remote semantics: a requested city never matches a remote job.
             if not matched:
-                return FilterOutcome(
-                    False, "location_mismatch", _gaps(gaps)
-                )
+                return FilterOutcome(False, "location_mismatch", _gaps(gaps))
 
     if hard.employment_types and features.employment is None:
         gaps.append("employment_type")
     elif hard.employment_types and features.employment not in hard.employment_types:
-        return FilterOutcome(
-            False, "employment_type_mismatch", _gaps(gaps)
-        )
+        return FilterOutcome(False, "employment_type_mismatch", _gaps(gaps))
 
     if hard.experience_levels and features.level is None:
         gaps.append("experience_level")

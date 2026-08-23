@@ -33,7 +33,7 @@ TRACKING_PARAM_NAMES: frozenset[str] = frozenset(
         "wickedid",
     }
 )
-TRACKING_PARAM_PREFIXES: tuple[str, ...] = ("utm_",)
+TRACKING_PARAM_PREFIXES: tuple[str, ...] = ("utm",)
 
 DEFAULT_PORTS: dict[str, int] = {"https": 443, "http": 80}
 
@@ -59,8 +59,7 @@ def canonicalize_url(url: str) -> str:
     pairs = [
         (key, value)
         for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if key not in TRACKING_PARAM_NAMES
-        and not key.lower().startswith(TRACKING_PARAM_PREFIXES)
+        if key not in TRACKING_PARAM_NAMES and not key.lower().startswith(TRACKING_PARAM_PREFIXES)
     ]
     pairs.sort()
     query = urlencode(pairs)
@@ -73,18 +72,34 @@ def canonicalize_with_declared(
     declared_canonical: str | None,
 ) -> tuple[str, bool]:
     """Apply canonicalization; honor <link rel=canonical> only when it points
-    to the same HTTPS host. Returns (canonical_url, honored_flag)."""
+    to the same HTTPS host AND the same path identity (query-insensitive).
+    The honored canonical's QUERY never overrides the fetched final URL's —
+    job-identity parameters always come from what we actually retrieved.
+    Returns (canonical_url, honored_flag)."""
     final_parts = urlsplit(final_url)
     if declared_canonical:
         declared_parts = urlsplit(declared_canonical.strip())
         same_host = (
             declared_parts.scheme.lower() == "https"
-            and (declared_parts.hostname or "").lower()
-            == (final_parts.hostname or "").lower()
+            and (declared_parts.hostname or "").lower() == (final_parts.hostname or "").lower()
         )
-        if same_host:
-            return canonicalize_url(declared_canonical), True
+        same_path = _path_identity(declared_canonical) == _path_identity(final_url)
+        if same_host and same_path:
+            return canonicalize_url(final_url), True
     return canonicalize_url(final_url), False
+
+
+def _path_identity(url: str) -> tuple[str, str, int | None, str]:
+    parts = urlsplit(url.strip())
+    port = parts.port
+    if port is not None and DEFAULT_PORTS.get(parts.scheme.lower()) == port:
+        port = None
+    return (
+        parts.scheme.lower(),
+        (parts.hostname or "").lower(),
+        port,
+        parts.path.rstrip("/") or "/",
+    )
 
 
 __all__ = [

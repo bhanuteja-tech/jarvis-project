@@ -36,7 +36,6 @@ from app.candidate.models import (
     ContactField,
     CoverageInfo,
     EducationField,
-    ExperienceItem,
     IdentityField,
     ProfileMeta,
     ProjectsField,
@@ -126,17 +125,13 @@ class ResumeAnalyzer:
         if not text:
             return CandidateResult(status="FAILED", reason="empty_resume")
         if len(text) > max_chars:
-            return CandidateResult(
-                status="FAILED", reason="max_chars_violation"
-            )
+            return CandidateResult(status="FAILED", reason="max_chars_violation")
 
         document = build_document(text, max_chars=max_chars)
         segmentation = segment_resume(document)
 
         emails, phones, links, contact_evidence = extract_contact(text)
-        name, name_evidence = extract_identity(
-            [block.text for block in document.blocks]
-        )
+        name, name_evidence = extract_identity([block.text for block in document.blocks])
 
         skills_field = extract_skills_field(segmentation, document.plain_text)
         experience_field = extract_experience_field(
@@ -173,9 +168,7 @@ class ResumeAnalyzer:
 
         warnings: list[str] = []
         if segmentation.unrecognized_headings:
-            warnings.append(
-                f"{segmentation.unrecognized_headings} unrecognized resume heading(s)"
-            )
+            warnings.append(f"{segmentation.unrecognized_headings} unrecognized resume heading(s)")
         if experience_field.status is ExtractionStatus.UNKNOWN:
             warnings.append("no experience section detected")
 
@@ -205,23 +198,17 @@ class ResumeAnalyzer:
             skills=skills_field,
             experience=experience_field,
             education=EducationField(
-                status=(
-                    ExtractionStatus.EXPLICIT if education_items else ExtractionStatus.UNKNOWN
-                ),
+                status=(ExtractionStatus.EXPLICIT if education_items else ExtractionStatus.UNKNOWN),
                 items=education_items,
             ),
             certifications=CertificationsField(
                 status=(
-                    ExtractionStatus.EXPLICIT
-                    if certification_items
-                    else ExtractionStatus.UNKNOWN
+                    ExtractionStatus.EXPLICIT if certification_items else ExtractionStatus.UNKNOWN
                 ),
                 items=certification_items,
             ),
             projects=ProjectsField(
-                status=(
-                    ExtractionStatus.EXPLICIT if project_items else ExtractionStatus.UNKNOWN
-                ),
+                status=(ExtractionStatus.EXPLICIT if project_items else ExtractionStatus.UNKNOWN),
                 items=project_items,
             ),
             preferences=preferences_info,
@@ -249,9 +236,7 @@ class ResumeAnalyzer:
         return self._finalize(profile, status=status)
 
     # ------------------------------------------------------------------
-    def _finalize(
-        self, profile: CandidateProfile, *, status: str = "PARSED"
-    ) -> CandidateResult:
+    def _finalize(self, profile: CandidateProfile, *, status: str = "PARSED") -> CandidateResult:
         if self._settings.candidate_redact_pii and not profile.redacted:
             profile = _redact(profile)
         return CandidateResult(status=status, profile=profile)

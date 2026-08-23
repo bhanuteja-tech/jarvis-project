@@ -51,9 +51,7 @@ def _blocked_reason(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str | 
         # Covers RFC1918 for IPv4 and ULA fc00::/7 (+NAT64 64:ff9b::/96 in
         # recent Pythons). Checked after the specific labels above.
         return "private_ip"
-    if isinstance(ip, ipaddress.IPv4Address) and ip in ipaddress.ip_network(
-        "198.18.0.0/15"
-    ):
+    if isinstance(ip, ipaddress.IPv4Address) and ip in ipaddress.ip_network("198.18.0.0/15"):
         return "benchmark_range"
     return None
 
@@ -85,9 +83,7 @@ async def assert_public_host(
     resolver: Resolver | None = None,
 ) -> list[str]:
     literal = _validate_ip_literal(host.strip("[]"))
-    addresses = literal if literal is not None else await (resolver or default_resolver)(
-        host
-    )
+    addresses = literal if literal is not None else await (resolver or default_resolver)(host)
     validated: list[str] = []
     for raw in addresses:
         literal_check = _validate_ip_literal(raw)
@@ -128,9 +124,11 @@ def validate_url(url: str, *, allow_http: bool = False) -> urlsplit:
             reason="invalid_url",
         )
 
+    # Explicit ports are a redirect/port-scan manipulation vector: only the
+    # https default may be spelled out; everything else (including :80 on
+    # tolerated http) is blocked.
     port = parts.port
-    allowed_ports = {443, 80} if allow_http else {443}
-    if port is not None and port not in allowed_ports:
+    if port is not None and port != 443:
         raise SourceSSRFBlockedError(
             f"port {port} is not allowed",
             reason="port_not_allowed",

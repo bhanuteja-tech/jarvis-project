@@ -68,16 +68,8 @@ async def test_live_searchapi_google_search_smoke() -> None:
         pytest.skip("SEARCHAPI_API_KEY not configured; refusing to run live smoke")
 
     adapter = GoogleSearchAdapter(_client(), max_pages=1)
-    query = (
-        '"machine learning intern" '
-        "(site:jobs.lever.co OR site:boards.greenhouse.io)"
-    )
-    result = await adapter.search(
-        {"searchapi": {"google_search": {"q": query}}}
-    )
+    query = '"machine learning intern" (site:jobs.lever.co OR site:boards.greenhouse.io)'
+    result = await adapter.search({"searchapi": {"google_search": {"q": query}}})
 
     assert not result.errors
-    print(
-        f"\nlive smoke OK: engine=google consumed 1 request; "
-        f"candidates={len(result.candidates)}"
-    )
+    print(f"\nlive smoke OK: engine=google consumed 1 request; candidates={len(result.candidates)}")

@@ -62,10 +62,6 @@ def validate_resume(
             break
 
     profile = candidate_result.get("profile") or {}
-    job = None
-    if evaluated_job_index is not None and jobs:
-        if 0 <= evaluated_job_index < len(jobs):
-            job = jobs[evaluated_job_index]
 
     warnings: list[str] = []
     errors: list[dict[str, Any]] = []
@@ -73,28 +69,24 @@ def validate_resume(
     # ---- truth checks -------------------------------------------------------
     truth_checks: list[CheckResult] = []
     try:
-        truth_checks.extend(
-            run_truth_checks(tailored, profile, analysis, match_result)
-        )
+        truth_checks.extend(run_truth_checks(tailored_result, profile, analysis, match_result))
     except Exception as exc:  # noqa: BLE001 - one check failing never crashes all
         logger.exception("truth validation crashed")
         truth_checks.append(
-            CheckResult("truth_validation", "failed",
-                        f"truth validator crashed: {type(exc).__name__}")
+            CheckResult(
+                "truth_validation", "failed", f"truth validator crashed: {type(exc).__name__}"
+            )
         )
 
     # ---- ats checks -----------------------------------------------------------
     ats_checks: list[CheckResult] = []
     metrics = None
     try:
-        ats_checks, metrics = evaluate_ats(
-            tailored, profile, analysis, match_result
-        )
+        ats_checks, metrics = evaluate_ats(tailored_result, profile, analysis, match_result)
     except Exception as exc:  # noqa: BLE001
         logger.exception("ats validation crashed")
         ats_checks.append(
-            CheckResult("ats_validation", "failed",
-                        f"ats validator crashed: {type(exc).__name__}")
+            CheckResult("ats_validation", "failed", f"ats validator crashed: {type(exc).__name__}")
         )
 
     truth_failed = any(check.status == "failed" for check in truth_checks)

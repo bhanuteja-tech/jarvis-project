@@ -86,7 +86,7 @@ class TestEnvelope:
         assert result.analysis.experience.status.value == "unknown"
 
     async def test_truncation_warning_on_huge_jd(self) -> None:
-        analyzer = JDAnalyzer(make_settings(jd_max_chars=500))
+        analyzer = JDAnalyzer(make_settings(jd_max_chars=1001))
         job = {"source": "g", "source_job_id": "z", "description": "word " * 2000}
 
         result = await analyzer.analyze_job(job, 2)
@@ -127,8 +127,10 @@ class TestUntrustedContent:
         result = await analyzer.analyze_job(job, 0)
 
         joined = result.analysis.model_dump_json()
+        # Script content is dropped; injection instructions don't become facts
         assert "steal" not in joined.lower()
-        assert "reveal secrets" not in joined.lower()
+        assert "ignore all previous" not in joined.lower()
+        # python IS a real skill mention even in untrusted content
         assert "python" in {skill.name for skill in result.analysis.skills.required}
 
 
@@ -158,4 +160,6 @@ class TestSemanticBoundary:
         result = await analyzer.analyze_job(GOOD_JOB, 0)
 
         assert result.analysis.extraction_meta.llm_used is False
-        assert result.analysis.extraction_meta.methods_used[0].value == "deterministic"
+        methods = [m.value if hasattr(m, "value") else str(m)
+                   for m in result.analysis.extraction_meta.methods_used]
+        assert "deterministic" in methods

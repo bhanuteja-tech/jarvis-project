@@ -10,27 +10,44 @@ from app.matching.views import (
 
 def make_candidate_result(**profile_overrides):
     profile = {
-        "skills": {"status": "explicit", "items": [
-            {"name": "python", "matched_as": "Python", "category": "language"},
-        ]},
+        "skills": {
+            "status": "explicit",
+            "items": [
+                {"name": "python", "matched_as": "Python", "category": "language"},
+            ],
+        },
         "experience": {
             "status": "explicit",
             "total_years": 6.0,
             "items": [
-                {"title": "Senior Backend Engineer", "company": "Acme",
-                 "skills_in_role": [{"name": "docker", "matched_as": "Docker",
-                                     "category": "tool"}]},
+                {
+                    "title": "Senior Backend Engineer",
+                    "company": "Acme",
+                    "skills_in_role": [
+                        {"name": "docker", "matched_as": "Docker", "category": "tool"}
+                    ],
+                },
             ],
         },
-        "education": {"status": "explicit", "items": [
-            {"degree": "bachelor", "degree_raw": "BSc",
-             "field_of_study": "Computer Science"},
-        ]},
-        "projects": {"status": "explicit", "items": [
-            {"name": "Side Project", "description": None, "url": None,
-             "technologies": [{"name": "fastapi", "matched_as": "FastAPI",
-                               "category": "framework"}]},
-        ]},
+        "education": {
+            "status": "explicit",
+            "items": [
+                {"degree": "bachelor", "degree_raw": "BSc", "field_of_study": "Computer Science"},
+            ],
+        },
+        "projects": {
+            "status": "explicit",
+            "items": [
+                {
+                    "name": "Side Project",
+                    "description": None,
+                    "url": None,
+                    "technologies": [
+                        {"name": "fastapi", "matched_as": "FastAPI", "category": "framework"}
+                    ],
+                },
+            ],
+        },
         "preferences": {
             "status": "explicit",
             "locations": ["Berlin"],
@@ -67,15 +84,18 @@ ANALYZED = {
             "required": [{"name": "python", "requirement": "required"}],
             "preferred": [{"name": "docker", "requirement": "preferred"}],
         },
-        "experience": {"min_years": 3, "max_years": 8,
-                       "level_word": None, "status": "explicit"},
+        "experience": {"min_years": 3, "max_years": 8, "level_word": None, "status": "explicit"},
         "education": {"status": "unknown", "items": []},
         "employment_type": {"value": "Full-time", "status": "explicit"},
         "work_arrangement": {"mode": "remote", "status": "explicit"},
         "location": {"job_location": "Remote", "remote_eligibility": True},
-        "salary": {"status": "explicit", "canonical_min": 100000.0,
-                   "canonical_max": 130000.0, "canonical_currency": "USD",
-                   "parsed_from_text": None},
+        "salary": {
+            "status": "explicit",
+            "canonical_min": 100000.0,
+            "canonical_max": 130000.0,
+            "canonical_currency": "USD",
+            "parsed_from_text": None,
+        },
     },
 }
 
@@ -131,8 +151,7 @@ class TestJobView:
         analysis = {
             "status": "ANALYZED",
             "analysis": {
-                "experience": {"min_years": None, "max_years": None,
-                               "level_word": "senior-level"},
+                "experience": {"min_years": None, "max_years": None, "level_word": "senior-level"},
             },
         }
         view = build_job_view(make_job(), 0, analysis)

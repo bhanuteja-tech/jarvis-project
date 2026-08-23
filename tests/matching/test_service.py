@@ -53,9 +53,7 @@ class TestServiceBehavior:
         outcome = run(jobs, [ANALYZED])
 
         assert outcome.summary.jobs_without_analysis == 2
-        missing = [
-            m for m in outcome.match_results if "jd_analysis_missing" in m.gaps
-        ]
+        missing = [m for m in outcome.match_results if "jd_analysis_missing" in m.gaps]
         assert len(missing) == 2
 
     def test_deterministic_repeat_runs(self) -> None:

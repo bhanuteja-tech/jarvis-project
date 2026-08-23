@@ -9,13 +9,36 @@ from __future__ import annotations
 import re
 
 from app.dedup.normalize import base_normalize
+from app.tailoring.models import ChangeRecord
 from app.tailoring.views import ExpRef, ProjRef, SkillRef
 
 _STOP_TOKENS: frozenset[str] = frozenset(
     {
-        "the", "and", "for", "with", "our", "you", "your", "will", "are",
-        "was", "were", "has", "have", "this", "that", "from", "into",
-        "their", "them", "they", "across", "about", "using", "use", "work",
+        "the",
+        "and",
+        "for",
+        "with",
+        "our",
+        "you",
+        "your",
+        "will",
+        "are",
+        "was",
+        "were",
+        "has",
+        "have",
+        "this",
+        "that",
+        "from",
+        "into",
+        "their",
+        "them",
+        "they",
+        "across",
+        "about",
+        "using",
+        "use",
+        "work",
     }
 )
 
@@ -81,14 +104,14 @@ def score_experience_item(
     matched_hits = 0
     for name in matched_skills:
         if name in item.skill_names or any(
-            _contains_skill(highlight.lower(), name)
-            for highlight in item.highlights
+            _contains_skill(highlight.lower(), name) for highlight in item.highlights
         ):
             matched_hits += 1
-    overlap = 1 if any(
-        responsibility_tokens & content_tokens(highlight)
-        for highlight in item.highlights
-    ) else 0
+    overlap = (
+        1
+        if any(responsibility_tokens & content_tokens(highlight) for highlight in item.highlights)
+        else 0
+    )
     return matched_hits * 2 + overlap
 
 
@@ -125,8 +148,7 @@ def select_highlights(
                 operation="highlight_select",
                 section="experience",
                 reason=(
-                    "no keyword signal in this entry; kept the first bullet "
-                    "to preserve substance"
+                    "no keyword signal in this entry; kept the first bullet to preserve substance"
                 ),
             )
         )
@@ -137,7 +159,7 @@ def select_highlights(
                 operation="highlight_select",
                 section="experience",
                 reason=f"selected {len(selected)} of {len(highlights)} bullets "
-                       f"by relevance to the target role",
+                f"by relevance to the target role",
             )
         )
     return sorted(selected), changes
@@ -150,9 +172,7 @@ def order_experience_items(
 ) -> list[int]:
     decorated: list[tuple[int, int, int, int]] = []
     for index, item in enumerate(items):
-        matches = sum(
-            1 for name in matched_skills if name in item.skill_names
-        )
+        matches = sum(1 for name in matched_skills if name in item.skill_names)
         duration = item.duration_months if item.duration_months is not None else -1
         decorated.append((index, matches, duration, index))
     decorated.sort(key=lambda row: (-row[1], -row[2], row[3]))
@@ -211,9 +231,7 @@ def build_summary(
     years_clause = ""
     if total_years is not None:
         years_text = f"{total_years:g}"
-        years_clause = (
-            f"{years_text} year{'s' if total_years != 1 else ''} of experience"
-        )
+        years_clause = f"{years_text} year{'s' if total_years != 1 else ''} of experience"
 
     skills_clause = ""
     if top_matched_skills:

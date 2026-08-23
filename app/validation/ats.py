@@ -7,7 +7,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.dedup.normalize import base_normalize
-from app.jdunderstanding.models import ExtractionStatus
 from app.jdunderstanding.taxonomy import find_skill_hits
 from app.validation.models import AtsMetrics, CheckResult, KeywordCount
 from app.validation.resolver import gather_evidence_corpus
@@ -39,30 +38,61 @@ def _coverage_pct(matched: int, total: int) -> float:
     return round(100.0 * matched / total, 1)
 
 
+def _rendered_text(tailored: Mapping[str, Any]) -> str:
+    """Text of the RENDERED artifact only — provenance fields like
+    original_text/evidence_refs/changes never reach an ATS scanner."""
+    surfaces: list[str] = []
+    summary = tailored.get("summary") or {}
+    if isinstance(summary.get("text"), str):
+        surfaces.append(summary["text"])
+    for item in tailored.get("skills") or []:
+        if isinstance(item, Mapping):
+            display = item.get("display") or item.get("name")
+            if isinstance(display, str):
+                surfaces.append(display)
+    for section in ("experience", "projects", "education", "certifications"):
+        for item in tailored.get(section) or []:
+            if not isinstance(item, Mapping):
+                continue
+            for key in ("title", "company", "date_range_raw", "name", "description",
+                        "degree", "issuer"):
+                value = item.get(key)
+                if isinstance(value, str):
+                    surfaces.append(value)
+            techs = item.get("technologies")
+            if isinstance(techs, list):
+                surfaces.extend(t for t in techs if isinstance(t, str))
+            for bullet in item.get("highlights") or []:
+                if isinstance(bullet, Mapping) and isinstance(bullet.get("final_text"), str):
+                    surfaces.append(bullet["final_text"])
+                elif isinstance(bullet, str):
+                    surfaces.append(bullet)
+    return "\n".join(surfaces)
+
+
 def evaluate_ats(
-    tailored_resume: Mapping[str, Any],
+    tailored_result: Mapping[str, Any],
     candidate_profile: Mapping[str, Any],
     analysis: Mapping[str, Any] | None,
     match_result: Mapping[str, Any] | None,
 ) -> tuple[list[CheckResult], AtsMetrics]:
     checks: list[CheckResult] = []
 
-    tailored_names = _tailored_skill_names(tailored_resume)
-    tailored_text = "\n".join(
-        str(value)
-        for value in _flatten(tailored_resume)
-        if isinstance(value, str)
-    )
-    corpus_text = "\n".join(
-        str(value)
-        for value in gather_evidence_corpus(candidate_profile)
-    )
+    # Accept either the full TailoringResult wrapper {"resume": ...} or a bare
+    # resume mapping — graph state always carries the wrapper.
+    raw = tailored_result.get("resume") if isinstance(tailored_result, Mapping) else None
+    tailored: Mapping[str, Any] = raw if isinstance(raw, Mapping) else tailored_result
+
+    tailored_names = _tailored_skill_names(tailored)
+    tailored_text = _rendered_text(tailored)
+    corpus_text = "\n".join(str(value) for value in gather_evidence_corpus(candidate_profile))
 
     # ---- A1/A2: required & preferred coverage -------------------------------
     jd_required: set[str] = set()
     jd_preferred: set[str] = set()
     if analysis is not None:
-        skills_section = analysis.get("skills") or {}
+        # Accept either a bare analysis mapping or the AnalysisResult wrapper.
+        skills_section = (analysis.get("analysis") or analysis).get("skills") or {}
         for item in skills_section.get("required") or []:
             name = item.get("name")
             if name:
@@ -78,10 +108,9 @@ def evaluate_ats(
     preferred_pct = _coverage_pct(len(matched_preferred), len(jd_preferred))
 
     missing_from_match = [
-        str(name).lower()
-        for name in (match_result or {}).get("missing_required") or []
+        str(name).lower() for name in (match_result or {}).get("missing_required") or []
     ]
-    unaddressed = tailored_resume.get("unaddressed_jd_requirements") or []
+    unaddressed = tailored.get("unaddressed_jd_requirements") or []
 
     a1_detail = (
         f"required skill coverage {required_pct}% "
@@ -89,8 +118,7 @@ def evaluate_ats(
         f"missing: {', '.join(sorted(jd_required - tailored_names)) or 'none'}"
     )
     consistency_problem = any(
-        name not in tailored_names and name not in unaddressed
-        for name in missing_from_match
+        name not in tailored_names and name not in unaddressed for name in missing_from_match
     ) or any(name.lower() not in missing_from_match for name in unaddressed)
     checks.append(
         CheckResult(
@@ -102,7 +130,8 @@ def evaluate_ats(
 
     checks.append(
         CheckResult(
-            "A2_preferred_skill_coverage", "passed",
+            "A2_preferred_skill_coverage",
+            "passed",
             f"preferred skill coverage {preferred_pct}% "
             f"({len(matched_preferred)}/{len(jd_preferred)})",
         )
@@ -111,24 +140,21 @@ def evaluate_ats(
     # ---- A3: responsibility token coverage ----------------------------------
     resp_tokens: set[str] = set()
     if analysis is not None:
-        resp_section = analysis.get("responsibilities") or {}
+        resp_section = (analysis.get("analysis") or analysis).get("responsibilities") or {}
         for item in resp_section.get("items") or []:
             text_value = item.get("text")
             if isinstance(text_value, str):
                 resp_tokens |= {
-                    token
-                    for token in base_normalize(text_value).split()
-                    if len(token) >= 3
+                    token for token in base_normalize(text_value).split() if len(token) >= 3
                 }
-    tailored_tokens = {
-        token for token in base_normalize(tailored_text).split() if len(token) >= 3
-    }
+    tailored_tokens = {token for token in base_normalize(tailored_text).split() if len(token) >= 3}
     covered_resp = len(resp_tokens & tailored_tokens)
     resp_total = max(1, len(resp_tokens))
     responsibility_coverage = round(100.0 * covered_resp / resp_total, 1)
     checks.append(
         CheckResult(
-            "A3_responsibility_token_coverage", "info",
+            "A3_responsibility_token_coverage",
+            "info",
             f"{covered_resp}/{resp_total} JD responsibility tokens appear in the "
             "tailored resume (informational)",
         )
@@ -136,77 +162,77 @@ def evaluate_ats(
 
     # ---- A4/A5: keyword counts + stuffing ------------------------------------
     keyword_counts = _keyword_counts(corpus_text, tailored_text)
+    top_delta = sorted(
+        keyword_counts, key=lambda e: e.tailored - e.original, reverse=True
+    )[:5]
+    delta_detail = ", ".join(f"{e.term} {e.original}->{e.tailored}" for e in top_delta)
+    checks.append(
+        CheckResult(
+            "A4_keyword_counts",
+            "info",
+            f"{len(keyword_counts)} taxonomy term(s) counted; largest deltas: "
+            f"{delta_detail or 'none'}",
+        )
+    )
 
     stuffing_terms: list[str] = []
     for entry in keyword_counts:
-        if (
-            entry.tailored >= _STUFF_MIN_COUNT
-            and entry.tailored > entry.original * _STUFF_RATIO
-        ):
+        if entry.tailored >= _STUFF_MIN_COUNT and entry.tailored > entry.original * _STUFF_RATIO:
             stuffing_terms.append(entry.term)
     if stuffing_terms:
         checks.append(
             CheckResult(
-                "A5_keyword_stuffing", "warning",
+                "A5_keyword_stuffing",
+                "warning",
                 "keyword stuffing suspected for: " + ", ".join(stuffing_terms[:8]),
             )
         )
     else:
-        checks.append(
-            CheckResult("A5_keyword_stuffing", "passed",
-                        "no keyword stuffing detected")
-        )
+        checks.append(CheckResult("A5_keyword_stuffing", "passed", "no keyword stuffing detected"))
 
     # ---- A6: section order/presence -------------------------------------------
-    present_order = [
-        key for key in _ORDER if key in tailored_resume and tailored_resume[key]
-    ]
+    present_order = [key for key in _ORDER if key in tailored and tailored[key]]
     positions = [_ORDER.index(key) for key in present_order]
     if positions == sorted(positions):
         checks.append(
-            CheckResult("A6_section_order", "passed",
-                        "sections follow the canonical ordering")
+            CheckResult("A6_section_order", "passed", "sections follow the canonical ordering")
         )
     else:
         checks.append(
-            CheckResult("A6_section_order", "warning",
-                        "section ordering deviates from the canonical sequence")
+            CheckResult(
+                "A6_section_order",
+                "warning",
+                "section ordering deviates from the canonical sequence",
+            )
         )
 
     # ---- A7: format limits -----------------------------------------------------
     format_problems: list[str] = []
     max_highlights = 10
-    for index, item in enumerate(tailored_resume.get("experience") or []):
+    for index, item in enumerate(tailored.get("experience") or []):
         highlight_count = len(item.get("highlights") or [])
         if highlight_count > max_highlights:
-            format_problems.append(
-                f"experience[{index}] has {highlight_count} highlights"
-            )
+            format_problems.append(f"experience[{index}] has {highlight_count} highlights")
         for bullet in item.get("highlights") or []:
             final_text = bullet.get("final_text") or ""
             if len(final_text) > 300:
                 format_problems.append(
-                    f"experience[{index}] has an over-long bullet "
-                    f"({len(final_text)} chars)"
+                    f"experience[{index}] has an over-long bullet ({len(final_text)} chars)"
                 )
     total_chars = len(tailored_text)
     if total_chars > 50_000:
         format_problems.append(f"resume length {total_chars} exceeds guidance")
 
     if format_problems:
-        checks.append(
-            CheckResult("A7_format_limits", "warning",
-                        "; ".join(format_problems[:5]))
-        )
+        checks.append(CheckResult("A7_format_limits", "warning", "; ".join(format_problems[:5])))
     else:
         checks.append(
-            CheckResult("A7_format_limits", "passed",
-                        "highlight caps and lengths within limits")
+            CheckResult("A7_format_limits", "passed", "highlight caps and lengths within limits")
         )
 
     # ---- A8: date-range connector consistency -----------------------------------
     connectors: set[str] = set()
-    for item in tailored_resume.get("experience") or []:
+    for item in tailored.get("experience") or []:
         date_range = item.get("date_range_raw")
         if isinstance(date_range, str) and re.search(r"\s[-–—]\s", date_range):
             for symbol in ("–", "—", "-"):
@@ -214,28 +240,27 @@ def evaluate_ats(
                     connectors.add(symbol)
     if len(connectors) > 1:
         checks.append(
-            CheckResult("A8_date_range_consistency", "warning",
-                        f"inconsistent range separators: {sorted(connectors)}")
+            CheckResult(
+                "A8_date_range_consistency",
+                "warning",
+                f"inconsistent range separators: {sorted(connectors)}",
+            )
         )
     else:
         checks.append(
-            CheckResult("A8_date_range_consistency", "passed",
-                        "consistent date-range separators")
+            CheckResult("A8_date_range_consistency", "passed", "consistent date-range separators")
         )
 
     metrics = AtsMetrics(
         required_coverage_pct=required_pct,
         preferred_coverage_pct=preferred_pct,
         responsibility_token_coverage_pct=responsibility_coverage,
-        keyword_counts=sorted(keyword_counts,
-                              key=lambda entry: (-entry.tailored, entry.term)),
+        keyword_counts=sorted(keyword_counts, key=lambda entry: (-entry.tailored, entry.term)),
     )
     return checks, metrics
 
 
-def _keyword_counts(
-    corpus_text: str, tailored_text: str
-) -> list[KeywordCount]:
+def _keyword_counts(corpus_text: str, tailored_text: str) -> list[KeywordCount]:
     original_hits: dict[str, int] = {}
     tailored_hits: dict[str, int] = {}
 

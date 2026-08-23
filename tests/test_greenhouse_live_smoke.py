@@ -38,9 +38,7 @@ async def test_live_greenhouse_smoke() -> None:
             "JARVIS_RUN_LIVE_SMOKE=1 pytest -m live"
         )
 
-    token = os.environ.get(
-        "JARVIS_LIVE_SMOKE_BOARD_TOKEN", DEFAULT_SMOKE_BOARD_TOKEN
-    )
+    token = os.environ.get("JARVIS_LIVE_SMOKE_BOARD_TOKEN", DEFAULT_SMOKE_BOARD_TOKEN)
     settings = make_settings(greenhouse_max_retries=1)
 
     async with GreenhouseClient(settings) as client:

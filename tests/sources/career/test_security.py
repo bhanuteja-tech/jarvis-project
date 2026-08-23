@@ -9,7 +9,11 @@ from app.sources.career.errors import (
     SourceSSRFBlockedError,
     UnsupportedSchemeError,
 )
-from app.sources.career.security import assert_public_host, validate_and_resolve
+from app.sources.career.security import (
+    assert_public_host,
+    validate_and_resolve,
+    validate_url,
+)
 from tests.support import make_settings
 
 
@@ -69,25 +73,26 @@ class TestIpGate:
         "ip",
         [
             "127.0.0.1",
-            "::1",
+            "[::1]",
             "10.1.2.3",
             "172.16.0.9",
             "192.168.1.5",
             "169.254.169.254",
-            "fe80::1",
-            "fc00::1",
-            "ff02::1",
+            "[fe80::1]",
+            "[fc00::1]",
+            "[ff02::1]",
             "240.0.0.1",
-            "::",
-            "::ffff:10.0.0.1",
-            "::ffff:169.254.169.254",
+            "[::]",
+            "[::ffff:10.0.0.1]",
+            "[::ffff:169.254.169.254]",
             "198.18.0.7",
         ],
     )
     async def test_blocked_addresses_raise(self, ip: str) -> None:
         settings = make_settings()
+        url = f"https://{ip}/job"
         with pytest.raises(SourceSSRFBlockedError) as excinfo:
-            await validate_and_resolve(settings, f"https://{ip}/job", resolver=None)
+            await validate_and_resolve(settings, url, resolver=None)
         assert excinfo.value.reason is not None
 
     async def test_public_literal_passes(self) -> None:
@@ -104,9 +109,7 @@ class TestIpGate:
         resolver = fake_resolver({"internal.example": ["10.0.0.5"]})
 
         with pytest.raises(SourceSSRFBlockedError) as excinfo:
-            await validate_and_resolve(
-                settings, "https://internal.example/job", resolver=resolver
-            )
+            await validate_and_resolve(settings, "https://internal.example/job", resolver=resolver)
         assert excinfo.value.reason == "private_ip"
 
     async def test_assert_public_host_returns_validated_ips(self) -> None:

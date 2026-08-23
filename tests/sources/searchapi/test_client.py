@@ -136,9 +136,7 @@ class TestSharedInfraRegression:
         assert excinfo.value.attempts == 2  # initial + 1 retry
         assert router.call_count == 2
 
-    async def test_persistent_429_raises_rate_limit_error(
-        self, fake_sleeper: FakeSleeper
-    ) -> None:
+    async def test_persistent_429_raises_rate_limit_error(self, fake_sleeper: FakeSleeper) -> None:
         router = ScriptedRouter(*[json_response({}, status_code=429)] * 10)
         client = make_searchapi_client(router, sleeper=fake_sleeper, searchapi_max_retries=1)
 
@@ -147,9 +145,7 @@ class TestSharedInfraRegression:
 
         assert excinfo.value.attempts == 2
 
-    async def test_timeout_maps_to_typed_retryable_error(
-        self, fake_sleeper: FakeSleeper
-    ) -> None:
+    async def test_timeout_maps_to_typed_retryable_error(self, fake_sleeper: FakeSleeper) -> None:
         router = ScriptedRouter(*[connect_timeout] * 5)
         client = make_searchapi_client(
             router,

@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from app.matching.models import MatchResult, MatchingSummary
+from app.matching.models import MatchingSummary, MatchResult
 from app.matching.scorer import score_pair
 from app.matching.views import build_candidate_view, build_job_view
 
@@ -37,14 +37,17 @@ def match_jobs(
     if not candidate_view.usable:
         return MatchingOutcome(
             match_results=[],
-            summary=MatchingSummary(evaluated=0, tiers={"strong": 0, "moderate": 0, "weak": 0},
-                                    jobs_without_analysis=0),
+            summary=MatchingSummary(
+                evaluated=0, tiers={"strong": 0, "moderate": 0, "weak": 0}, jobs_without_analysis=0
+            ),
             skipped_reason="candidate_profile_unusable",
         )
 
     analyses_by_index: dict[int, Mapping[str, Any]] = {}
     if jd_analyses:
         for entry in jd_analyses:
+            if not isinstance(entry, Mapping):
+                continue
             index_value = entry.get("job_index")
             if isinstance(index_value, int) and 0 <= index_value < len(jobs):
                 analyses_by_index.setdefault(index_value, entry)
@@ -52,8 +55,7 @@ def match_jobs(
     jobs_without_analysis = sum(
         1
         for index in range(len(jobs))
-        if index not in analyses_by_index
-        or analyses_by_index[index].get("analysis") is None
+        if index not in analyses_by_index or analyses_by_index[index].get("analysis") is None
     )
 
     scored: list[tuple[int, Any]] = []
@@ -65,15 +67,9 @@ def match_jobs(
         tiers[result["tier"]] += 1
 
         matched_required_component = result["breakdown"]["skills_required"]
-        matched_names = sorted(
-            job_view.required_skills & candidate_view.skill_names
-        )
-        missing_required = sorted(
-            job_view.required_skills - candidate_view.skill_names
-        )
-        preferred_matched = sorted(
-            job_view.preferred_skills & candidate_view.skill_names
-        )
+        matched_names = sorted(job_view.required_skills & candidate_view.skill_names)
+        missing_required = sorted(job_view.required_skills - candidate_view.skill_names)
+        preferred_matched = sorted(job_view.preferred_skills & candidate_view.skill_names)
         matched_all = sorted(set(matched_names) | set(preferred_matched))
 
         gaps: list[str] = []
@@ -96,14 +92,19 @@ def match_jobs(
             gaps=gaps,
             warnings=[
                 *warnings,
-                *( [f"{len(gaps)} evidence gap(s)"] if gaps else [] ),
+                *([f"{len(gaps)} evidence gap(s)"] if gaps else []),
             ],
         )
-        scored.append((index, {
-            "result": match_result,
-            "skills_points": matched_required_component.points,
-            "experience_points": result["breakdown"]["experience"].points,
-        }))
+        scored.append(
+            (
+                index,
+                {
+                    "result": match_result,
+                    "skills_points": matched_required_component.points,
+                    "experience_points": result["breakdown"]["experience"].points,
+                },
+            )
+        )
 
     scored.sort(
         key=lambda item: (

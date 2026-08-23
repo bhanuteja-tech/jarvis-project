@@ -83,11 +83,14 @@ class TestIdentityStrategy:
         assert second.source_job_id == expected
 
         # Same inputs -> same id again (no clock/randomness involved).
-        assert derive_fallback_id(
-            company_name="Fallback Co",
-            title="Data Engineer (Fallback Identity)",
-            location="Austin, TX",
-        ) == expected
+        assert (
+            derive_fallback_id(
+                company_name="Fallback Co",
+                title="Data Engineer (Fallback Identity)",
+                location="Austin, TX",
+            )
+            == expected
+        )
 
 
 def _two_page_router() -> ScriptedRouter:
@@ -148,9 +151,7 @@ class TestCanonicalMapping:
         assert "created_at" not in job.extra
 
     async def test_missing_optional_fields_remain_none(self) -> None:
-        router = ScriptedRouter(
-            json_response(load_searchapi_fixture("jobs_missing_optional.json"))
-        )
+        router = ScriptedRouter(json_response(load_searchapi_fixture("jobs_missing_optional.json")))
         adapter = make_adapter(router)
 
         (job,) = (await collect(adapter)).jobs
@@ -229,9 +230,7 @@ class TestPartialDataPolicy:
         assert len(failed) == 1
 
     async def test_structurally_wrong_payload_raises_validation_error(self) -> None:
-        router = ScriptedRouter(
-            json_response(load_searchapi_fixture("malformed_response.json"))
-        )
+        router = ScriptedRouter(json_response(load_searchapi_fixture("malformed_response.json")))
         adapter = make_adapter(router)
 
         with pytest.raises(SourceValidationError):
@@ -255,9 +254,7 @@ class TestApprovedCorrectionGuards:
 
         result = await adapter.fetch_jobs(preferences(time_period="last_30_minutes"))
 
-        ignored = [
-            w for w in result.warnings if w.code == "unsupported_parameters_ignored"
-        ]
+        ignored = [w for w in result.warnings if w.code == "unsupported_parameters_ignored"]
         assert len(ignored) == 1
         assert "time_period" in ignored[0].message
 
@@ -268,9 +265,7 @@ class TestApprovedCorrectionGuards:
         result = await adapter.fetch_jobs(preferences(num=100))
 
         message = next(
-            w.message
-            for w in result.warnings
-            if w.code == "unsupported_parameters_ignored"
+            w.message for w in result.warnings if w.code == "unsupported_parameters_ignored"
         )
         assert "num" in message
 
@@ -289,4 +284,3 @@ async def collect_with(
     router: ScriptedRouter, adapter: GoogleJobsAdapter, **extra_params
 ) -> FetchResult:
     return await adapter.fetch_jobs(preferences(**extra_params))
-

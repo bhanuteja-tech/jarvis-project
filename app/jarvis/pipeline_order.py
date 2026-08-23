@@ -50,18 +50,14 @@ def successors(node: str) -> tuple[str, ...]:
     return _SUCCESSORS.get(node, ())
 
 
-def derive_next_starts(
-    completed_nodes: set[str], already_started: set[str]
-) -> list[str]:
+def derive_next_starts(completed_nodes: set[str], already_started: set[str]) -> list[str]:
     """Nodes whose predecessors have ALL completed and that have not started."""
     out: list[str] = []
     for node in CANONICAL_ORDER:
         if node in already_started or node in completed_nodes:
             continue
         predecessors = [
-            candidate
-            for candidate, successors in _SUCCESSORS.items()
-            if node in successors
+            candidate for candidate, successors in _SUCCESSORS.items() if node in successors
         ]
         if predecessors and all(p in completed_nodes for p in predecessors):
             out.append(node)

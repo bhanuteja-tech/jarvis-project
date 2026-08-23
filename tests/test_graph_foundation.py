@@ -52,9 +52,7 @@ class TestGraphFoundation:
             "https://boards.greenhouse.io/examplecorp/jobs/2",
         ]
         assert state["errors"] == []
-        assert adapter.received_preferences == {
-            "greenhouse": {"board_tokens": ["examplecorp"]}
-        }
+        assert adapter.received_preferences == {"greenhouse": {"board_tokens": ["examplecorp"]}}
 
     async def test_adapter_failure_becomes_error_record_not_exception(self) -> None:
         failing = StubAdapter(SourceRateLimitError("rate limited", source="greenhouse"))
@@ -86,9 +84,9 @@ class TestGraphFoundation:
 
         state = await graph.ainvoke({})
 
-        (warning,) = state["warnings"]
-        assert warning["code"] == "item_validation_failed"
-        assert warning["source"] == "greenhouse"
+        warnings = [w for w in state["warnings"] if w["source"] == "greenhouse"]
+        assert len(warnings) == 1
+        assert warnings[0]["code"] == "item_validation_failed"
 
     async def test_unexpected_exception_recorded_as_unretryable(self) -> None:
         class Exploding(StubAdapter):

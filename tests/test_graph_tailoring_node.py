@@ -35,16 +35,24 @@ def make_candidate_result():
         "status": "PARSED",
         "profile": {
             "profile_id": "pid-t",
-            "skills": {"status": "explicit", "items": [
-                {"name": "python", "matched_as": "Python",
-                 "category": "language"},
-            ]},
-            "experience": {"status": "explicit", "total_years": 5.0,
-                           "items": [
-                {"title": "Data Engineer", "company": "Acme",
-                 "highlights": ["Built python pipelines"],
-                 "duration_months": 60},
-            ]},
+            "skills": {
+                "status": "explicit",
+                "items": [
+                    {"name": "python", "matched_as": "Python", "category": "language"},
+                ],
+            },
+            "experience": {
+                "status": "explicit",
+                "total_years": 5.0,
+                "items": [
+                    {
+                        "title": "Data Engineer",
+                        "company": "Acme",
+                        "highlights": ["Built python pipelines"],
+                        "duration_months": 60,
+                    },
+                ],
+            },
             "education": {"items": []},
             "certifications": {"items": []},
             "projects": {"items": []},
@@ -92,13 +100,10 @@ class TestTailoringNodeIntegration:
         state = await graph.ainvoke({})
 
         assert "tailored_resume" not in state
-        warnings = [w for w in state.get("warnings") or []
-                    if w["source"] == "tailoring"]
+        warnings = [w for w in state.get("warnings") or [] if w["source"] == "tailoring"]
         assert any(w["code"] == "tailoring_skipped_no_candidate" for w in warnings)
 
-    async def test_fail_open_on_unexpected_tailoring_failure(
-        self, monkeypatch
-    ) -> None:
+    async def test_fail_open_on_unexpected_tailoring_failure(self, monkeypatch) -> None:
         def boom(*_args, **_kwargs):
             raise RuntimeError("tailoring exploded")
 
@@ -116,11 +121,8 @@ class TestTailoringNodeIntegration:
         # Prior phases preserved.
         assert len(state["jobs"]) == 1
         assert len(state["match_results"]) >= 1
-        (tailoring_error,) = [
-            e for e in state["errors"] if e["source"] == "tailoring"
-        ]
+        (tailoring_error,) = [e for e in state["errors"] if e["source"] == "tailoring"]
         assert tailoring_error["retryable"] is False
-        warnings = [w for w in state.get("warnings") or []
-                    if w["source"] == "tailoring"]
+        warnings = [w for w in state.get("warnings") or [] if w["source"] == "tailoring"]
         assert any(w["code"] == "tailoring_failed" for w in warnings)
         assert "tailored_resume" not in state

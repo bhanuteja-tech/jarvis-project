@@ -105,6 +105,4 @@ class TestSearchPreferences:
 
     def test_limit_bounds_enforced(self) -> None:
         with pytest.raises(ValidationError):
-            SearchPreferences.model_validate(
-                {"soft": {"limit": 0}}
-            )
+            SearchPreferences.model_validate({"soft": {"limit": 0}})

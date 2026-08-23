@@ -3,6 +3,8 @@ LLM-disabled default, deterministic output."""
 
 from __future__ import annotations
 
+import asyncio
+
 from app.config.settings import Settings
 from app.tailoring.service import tailor_resume
 
@@ -10,39 +12,72 @@ RESUME_PROFILE = {
     "status": "PARSED",
     "profile": {
         "profile_id": "pid-1",
-        "skills": {"status": "explicit", "items": [
-            {"name": "python", "matched_as": "Python", "category": "language"},
-            {"name": "sql", "matched_as": "SQL", "category": "language"},
-        ]},
-        "experience": {"status": "explicit", "total_years": 6.0, "items": [
-            {"title": "Data Engineer", "company": "Acme",
-             "start_raw": "Jan 2021", "end_raw": "Present",
-             "start_iso": "2021-01-01", "end_iso": "2026-08-01",
-             "is_current": True, "duration_months": 68,
-             "highlights": [
-                 "Built python data pipelines",
-                 "Managed postgres cluster",
-                 "Answered support tickets",
-             ],
-             "skills_in_role": []},
-        ]},
-        "projects": {"status": "explicit", "items": [
-            {"name": "ETL Tool", "description": "python etl toolkit",
-             "url": None, "technologies": [
-                 {"name": "python", "matched_as": "Python"}]},
-        ]},
-        "education": {"status": "explicit", "items": [
-            {"degree": "bachelor", "degree_raw": "BSc",
-             "field_of_study": "Computer Science",
-             "institution": "Acme University", "graduation_year": 2018},
-        ]},
-        "certifications": {"status": "explicit", "items": [
-            {"name": "AWS Certified Solutions Architect"}]},
-        "summary": {"status": "explicit",
-                    "text": "Data engineer with python focus."},
-        "preferences": {"status": "unknown", "locations": [], "remote": None,
-                        "relocation": None, "employment_types": [],
-                        "salary_min": None, "evidence": []},
+        "skills": {
+            "status": "explicit",
+            "items": [
+                {"name": "python", "matched_as": "Python", "category": "language"},
+                {"name": "sql", "matched_as": "SQL", "category": "language"},
+            ],
+        },
+        "experience": {
+            "status": "explicit",
+            "total_years": 6.0,
+            "items": [
+                {
+                    "title": "Data Engineer",
+                    "company": "Acme",
+                    "start_raw": "Jan 2021",
+                    "end_raw": "Present",
+                    "start_iso": "2021-01-01",
+                    "end_iso": "2026-08-01",
+                    "is_current": True,
+                    "duration_months": 68,
+                    "highlights": [
+                        "Built python data pipelines",
+                        "Managed postgres cluster",
+                        "Answered support tickets",
+                    ],
+                    "skills_in_role": [],
+                },
+            ],
+        },
+        "projects": {
+            "status": "explicit",
+            "items": [
+                {
+                    "name": "ETL Tool",
+                    "description": "python etl toolkit",
+                    "url": None,
+                    "technologies": [{"name": "python", "matched_as": "Python"}],
+                },
+            ],
+        },
+        "education": {
+            "status": "explicit",
+            "items": [
+                {
+                    "degree": "bachelor",
+                    "degree_raw": "BSc",
+                    "field_of_study": "Computer Science",
+                    "institution": "Acme University",
+                    "graduation_year": 2018,
+                },
+            ],
+        },
+        "certifications": {
+            "status": "explicit",
+            "items": [{"name": "AWS Certified Solutions Architect"}],
+        },
+        "summary": {"status": "explicit", "text": "Data engineer with python focus."},
+        "preferences": {
+            "status": "unknown",
+            "locations": [],
+            "remote": None,
+            "relocation": None,
+            "employment_types": [],
+            "salary_min": None,
+            "evidence": [],
+        },
     },
 }
 
@@ -62,14 +97,17 @@ ANALYSIS = {
             "required": [{"name": "python"}, {"name": "docker"}],
             "preferred": [{"name": "sql"}],
         },
-        "responsibilities": {"items": [
-            {"text": "Build python data pipelines"},
-        ]},
+        "responsibilities": {
+            "items": [
+                {"text": "Build python data pipelines"},
+            ]
+        },
     },
 }
 
-JOBS = [{"source": "greenhouse", "source_job_id": "1",
-         "title": "Data Engineer", "company": "TargetCo"}]
+JOBS = [
+    {"source": "greenhouse", "source_job_id": "1", "title": "Data Engineer", "company": "TargetCo"}
+]
 
 
 def run(**settings_overrides):
@@ -79,9 +117,15 @@ def run(**settings_overrides):
         tailoring_llm_enabled=False,
         **settings_overrides,
     )
-    return tailor_resume(
-        RESUME_PROFILE, [MATCH], [ANALYSIS], JOBS,
-        None, settings,
+    return asyncio.run(
+        tailor_resume(
+            RESUME_PROFILE,
+            [MATCH],
+            [ANALYSIS],
+            JOBS,
+            None,
+            settings,
+        )
     )
 
 
@@ -140,61 +184,82 @@ class TestHappyPath:
 
 class TestDegradedPaths:
     def test_missing_jd_analysis_is_partial(self) -> None:
-        outcome = tailor_resume(
-            RESUME_PROFILE, [MATCH], [],
-            JOBS, None,
+        outcome = asyncio.run(tailor_resume(
+            RESUME_PROFILE,
+            [MATCH],
+            [],
+            JOBS,
+            None,
             Settings(tailor_max_highlights=3, tailor_max_projects=3),
-        )
+        ))
 
         result = outcome.result
         assert result.status.value == "partial"
-        assert any("jd analysis unavailable" in change.reason.lower()
-                   for change in result.resume.changes)
+        assert any(
+            "jd analysis unavailable" in change.reason.lower() for change in result.resume.changes
+        )
 
     def test_no_matches_fails(self) -> None:
-        outcome = tailor_resume(
-            RESUME_PROFILE, [], [], JOBS, None,
+        outcome = asyncio.run(tailor_resume(
+            RESUME_PROFILE,
+            [],
+            [],
+            JOBS,
+            None,
             Settings(),
-        )
+        ))
 
         assert outcome.result.status.value == "failed"
         assert outcome.result.reason == "no_matches"
 
     def test_invalid_override_target_fails(self) -> None:
-        outcome = tailor_resume(
-            RESUME_PROFILE, [MATCH], [ANALYSIS], JOBS,
+        outcome = asyncio.run(tailor_resume(
+            RESUME_PROFILE,
+            [MATCH],
+            [ANALYSIS],
+            JOBS,
             {"target_job_index": 42},
             Settings(),
-        )
+        ))
 
         assert outcome.result.status.value == "failed"
         assert outcome.result.reason == "invalid_target_job_index"
 
     def test_unusable_candidate_skips(self) -> None:
-        outcome = tailor_resume(
-            {"status": "FAILED", "profile": None}, [MATCH], [ANALYSIS],
-            JOBS, None, Settings(),
-        )
+        outcome = asyncio.run(tailor_resume(
+            {"status": "FAILED", "profile": None},
+            [MATCH],
+            [ANALYSIS],
+            JOBS,
+            None,
+            Settings(),
+        ))
 
         assert outcome.result.status.value == "skipped"
         assert outcome.result.reason == "no_usable_candidate_profile"
 
     def test_sparse_profile_partial_without_invention(self) -> None:
-        sparse = {"status": "PARTIAL", "profile": {
-            "profile_id": "pid-2",
-            "skills": {"status": "unknown", "items": []},
-            "experience": {"status": "unknown", "total_years": None,
-                           "items": []},
-            "education": {"status": "unknown", "items": []},
-            "certifications": {"status": "unknown", "items": []},
-            "projects": {"status": "unknown", "items": []},
-            "summary": {"status": "unknown", "text": None},
-            "preferences": {"status": "unknown"},
-        }}
-        outcome = tailor_resume(
-            sparse, [MATCH], [ANALYSIS], JOBS, None,
+        sparse = {
+            "status": "PARTIAL",
+            "profile": {
+                "profile_id": "pid-2",
+                "skills": {"status": "unknown", "items": []},
+                "experience": {"status": "unknown", "total_years": None, "items": []},
+                "education": {"status": "unknown", "items": []},
+                "certifications": {"status": "unknown", "items": []},
+                "projects": {"status": "unknown", "items": []},
+                "summary": {"status": "unknown", "text": None},
+                "preferences": {"status": "unknown"},
+            },
+        }
+        outcome = asyncio.run(tailor_resume(
+            sparse,
+            [MATCH],
+            [ANALYSIS],
+            JOBS,
+            None,
             Settings(tailor_max_highlights=3, tailor_max_projects=3),
-        )
+        ))
 
         result = outcome.result
         assert result.status.value == "partial"

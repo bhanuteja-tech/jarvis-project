@@ -10,11 +10,11 @@ Unknown event types must be ignored by clients (forward compatibility).
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class EventType(str, Enum):
+class EventType(StrEnum):
     AGENT_STARTED = "agent_started"
     AGENT_THINKING = "agent_thinking"
     AGENT_SPEAKING = "agent_speaking"

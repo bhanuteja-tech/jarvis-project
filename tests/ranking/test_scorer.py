@@ -134,10 +134,10 @@ class TestLocationAndLevelComponents:
 
 class TestFreshnessComponent:
     def test_tiered_freshness_from_source_created_at_only(self) -> None:
-        fresh = score(make_job(source_created_at="2026-08-22T08:00:00Z"))      # 4h
-        days_old = score(make_job(source_created_at="2026-08-20T00:00:00Z"))   # ~2.5d
+        fresh = score(make_job(source_created_at="2026-08-22T08:00:00Z"))  # 4h
+        days_old = score(make_job(source_created_at="2026-08-20T00:00:00Z"))  # ~2.5d
         weeks_old = score(make_job(source_created_at="2026-08-12T00:00:00Z"))  # ~10.5d
-        ancient = score(make_job(source_created_at="2025-01-01T00:00:00Z"))    # >30d
+        ancient = score(make_job(source_created_at="2025-01-01T00:00:00Z"))  # >30d
 
         assert fresh.breakdown["freshness"].points == 10
         assert days_old.breakdown["freshness"].points == 8
@@ -207,9 +207,11 @@ class TestTotalsAndTieBreaks:
             },
         )
 
-        total = sum(
-            component.points for _, component in _flatten(result.breakdown)
-        ) if False else sum(component.points for _, component in _iter(result.breakdown))
+        total = (
+            sum(component.points for _, component in _flatten(result.breakdown))
+            if False
+            else sum(component.points for _, component in _iter(result.breakdown))
+        )
         assert result.total == round(total, 2)
 
     def test_deterministic_ordering_via_tie_key(self) -> None:

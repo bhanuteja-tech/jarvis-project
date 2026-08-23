@@ -31,9 +31,7 @@ class TestHeadingVariants:
         raw = "Minimum Qualifications We Love\n- Curiosity\n"
         segmentation = _segment(raw)
 
-        assert any(
-            section.kind is SectionKind.REQUIREMENTS for section in segmentation.sections
-        )
+        assert any(section.kind is SectionKind.REQUIREMENTS for section in segmentation.sections)
 
     def test_unknown_heading_retained_as_other(self) -> None:
         raw = "Our Galactic Mission\nExplore strange new worlds.\n"
@@ -47,9 +45,7 @@ class TestHeadingVariants:
         raw = "Requirements\nPython required.\n"
         segmentation = _segment(raw)
 
-        assert any(
-            section.kind is SectionKind.REQUIREMENTS for section in segmentation.sections
-        )
+        assert any(section.kind is SectionKind.REQUIREMENTS for section in segmentation.sections)
 
 
 class TestContentIntegrity:

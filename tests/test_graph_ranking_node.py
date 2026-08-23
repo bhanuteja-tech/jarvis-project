@@ -75,8 +75,7 @@ class TestRankingNodeIntegration:
         scores = [item["score"] for item in ranked]
         assert scores == sorted(scores, reverse=True)
         assert (
-            ranked[0]["breakdown"]["title"]["points"]
-            >= ranked[1]["breakdown"]["title"]["points"]
+            ranked[0]["breakdown"]["title"]["points"] >= ranked[1]["breakdown"]["title"]["points"]
         )
 
     async def test_summary_histogram_present(self) -> None:

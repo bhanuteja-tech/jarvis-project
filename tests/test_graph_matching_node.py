@@ -38,48 +38,73 @@ def make_candidate_profile_result():
             "profile_id": "abc123",
             "source_format": "plain_text",
             "identity": {"status": "inferred", "full_name": "Jane Doe"},
-            "contact": {"status": "explicit", "pii": True,
-                        "emails": ["jane@example.com"], "phones": [],
-                        "links": [], "evidence": []},
+            "contact": {
+                "status": "explicit",
+                "pii": True,
+                "emails": ["jane@example.com"],
+                "phones": [],
+                "links": [],
+                "evidence": [],
+            },
             "summary": {"status": "unknown", "text": None, "evidence": []},
             "skills": {
                 "status": "explicit",
                 "items": [
-                    {"name": "python", "matched_as": "Python",
-                     "category": "language"},
-                    {"name": "machine learning", "matched_as": "machine learning",
-                     "category": "concept"},
+                    {"name": "python", "matched_as": "Python", "category": "language"},
+                    {
+                        "name": "machine learning",
+                        "matched_as": "machine learning",
+                        "category": "concept",
+                    },
                 ],
             },
             "experience": {
                 "status": "explicit",
                 "total_years": 6.0,
                 "items": [
-                    {"title": "Senior ML Engineer", "company": "Beta",
-                     "location": None, "start_raw": "Jan 2020",
-                     "end_raw": "Present", "start_iso": "2020-01-01",
-                     "end_iso": "2026-08-01", "is_current": True,
-                     "duration_months": 80, "highlights": [],
-                     "skills_in_role": [
-                         {"name": "docker", "matched_as": "Docker",
-                          "category": "tool"}
-                     ],
-                     "evidence": {"text": "Jan 2020 - Present",
-                                  "field": "resume.experience",
-                                  "method": "deterministic",
-                                  "confidence": "high", "line": None}},
+                    {
+                        "title": "Senior ML Engineer",
+                        "company": "Beta",
+                        "location": None,
+                        "start_raw": "Jan 2020",
+                        "end_raw": "Present",
+                        "start_iso": "2020-01-01",
+                        "end_iso": "2026-08-01",
+                        "is_current": True,
+                        "duration_months": 80,
+                        "highlights": [],
+                        "skills_in_role": [
+                            {"name": "docker", "matched_as": "Docker", "category": "tool"}
+                        ],
+                        "evidence": {
+                            "text": "Jan 2020 - Present",
+                            "field": "resume.experience",
+                            "method": "deterministic",
+                            "confidence": "high",
+                            "line": None,
+                        },
+                    },
                 ],
             },
-            "education": {"status": "explicit", "items": [
-                {"degree": "bachelor", "degree_raw": "BSc",
-                 "field_of_study": "Computer Science",
-                 "institution": "Acme University",
-                 "graduation_year": 2015,
-                 "evidence": {"text": "BSc in Computer Science",
-                              "field": "resume.education",
-                              "method": "deterministic",
-                              "confidence": "medium", "line": None}},
-            ]},
+            "education": {
+                "status": "explicit",
+                "items": [
+                    {
+                        "degree": "bachelor",
+                        "degree_raw": "BSc",
+                        "field_of_study": "Computer Science",
+                        "institution": "Acme University",
+                        "graduation_year": 2015,
+                        "evidence": {
+                            "text": "BSc in Computer Science",
+                            "field": "resume.education",
+                            "method": "deterministic",
+                            "confidence": "medium",
+                            "line": None,
+                        },
+                    },
+                ],
+            },
             "certifications": {"status": "unknown", "items": []},
             "projects": {"status": "unknown", "items": []},
             "preferences": {
@@ -88,14 +113,16 @@ def make_candidate_profile_result():
                 "remote": True,
                 "relocation": True,
                 "employment_types": ["full_time"],
-                "salary_min": {"amount": 90000.0,
-                               "currency": "USD", "period": "year"},
+                "salary_min": {"amount": 90000.0, "currency": "USD", "period": "year"},
                 "evidence": [],
             },
-            "coverage": {"sections_found": ["skills", "experience"],
-                         "unrecognized_headings": 0},
-            "metadata": {"source_format": "plain_text", "text_chars": 500,
-                         "truncated": False, "duration_ms": 1.0},
+            "coverage": {"sections_found": ["skills", "experience"], "unrecognized_headings": 0},
+            "metadata": {
+                "source_format": "plain_text",
+                "text_chars": 500,
+                "truncated": False,
+                "duration_ms": 1.0,
+            },
             "redacted": False,
             "warnings": [],
         },
@@ -148,19 +175,16 @@ class TestMatchingNodeIntegration:
     async def test_failed_candidate_skips_matching(self) -> None:
         adapter = StubAdapter(jobs=[make_job()])
         graph = build_workflow([adapter])
-        failed = {"status": "FAILED", "profile": None,
-                  "reason": "empty_resume"}
+        failed = {"status": "FAILED", "profile": None, "reason": "empty_resume"}
 
-        state = await graph.ainvoke(
-            {"candidate_input": {"text": ""},
-             "candidate_profile": failed}
-        )
+        state = await graph.ainvoke({"candidate_input": {"text": ""}, "candidate_profile": failed})
 
         assert "match_results" not in state
         warnings = [w for w in state.get("warnings") or [] if w["source"] == "matching"]
         assert any(
-            w["code"] == "matching_skipped_no_candidate" and
-            "FAILED" in w["message"] or "unusable" in w["message"]
+            w["code"] == "matching_skipped_no_candidate"
+            and "FAILED" in w["message"]
+            or "unusable" in w["message"]
             for w in warnings
         )
 

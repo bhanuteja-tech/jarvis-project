@@ -46,8 +46,7 @@ class TestJobUrlKey:
             source="searchapi",
             extra={"engine": "google_jobs"},
             job_url=(
-                "https://www.google.com/search?ibp=htl;jobs"
-                "&htidocid=2_EkUK_X1ZOKUz-CAAAAAA%3D%3D"
+                "https://www.google.com/search?ibp=htl;jobs&htidocid=2_EkUK_X1ZOKUz-CAAAAAA%3D%3D"
             ),
         )
 
@@ -68,9 +67,7 @@ class TestJobUrlKey:
 
 class TestApplyUrlKey:
     def test_apply_key_is_normalized_corroboration_helper_only(self) -> None:
-        job = make_job(
-            apply_url="https://ats.example.com/apply/9?utm_campaign=g&req=42"
-        )
+        job = make_job(apply_url="https://ats.example.com/apply/9?utm_campaign=g&req=42")
         key = apply_url_key(job)
 
         assert key == "https://ats.example.com/apply/9?req=42"

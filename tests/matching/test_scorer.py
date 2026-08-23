@@ -4,13 +4,110 @@ from __future__ import annotations
 
 from app.matching.scorer import score_pair
 from app.matching.views import build_candidate_view, build_job_view
-from tests.matching.test_views import ANALYZED, make_candidate_result, make_job
+
+ANALYZED = {
+    "status": "ANALYZED",
+    "job_index": 0,
+    "analysis": {
+        "skills": {
+            "status": "explicit",
+            "required": [{"name": "python", "requirement": "required"}],
+            "preferred": [{"name": "docker", "requirement": "preferred"}],
+        },
+        "experience": {"min_years": 3, "max_years": 8, "level_word": None, "status": "explicit"},
+        "education": {"status": "unknown", "items": []},
+        "employment_type": {"value": "Full-time", "status": "explicit"},
+        "work_arrangement": {"mode": "remote", "status": "explicit"},
+        "location": {"job_location": "Remote", "remote_eligibility": True},
+        "salary": {
+            "status": "explicit",
+            "canonical_min": 100000.0,
+            "canonical_max": 130000.0,
+            "canonical_currency": "USD",
+            "parsed_from_text": None,
+        },
+    },
+}
 
 
 def score(job=None, candidate=None, analysis=ANALYZED):
     job_view = build_job_view(job or make_job(), 0, analysis)
     candidate_view = build_candidate_view(candidate or make_candidate_result())
     return score_pair(candidate_view, job_view)
+
+
+def make_job(**overrides):
+    job = {
+        "source": "greenhouse",
+        "source_job_id": "1",
+        "title": "Backend Engineer",
+        "company": "Acme",
+        "location": "Remote",
+        "employment_type": "Full-time",
+        "salary": None,
+    }
+    job.update(overrides)
+    return job
+
+
+def make_candidate_result(**profile_overrides):
+    profile = {
+        "skills": {
+            "status": "explicit",
+            "items": [
+                {"name": "python", "matched_as": "Python", "category": "language"},
+            ],
+        },
+        "experience": {
+            "status": "explicit",
+            "total_years": 6.0,
+            "items": [
+                {
+                    "title": "Senior Backend Engineer",
+                    "company": "Acme",
+                    "location": None,
+                    "start_raw": "Jan 2020",
+                    "end_raw": "Present",
+                    "start_iso": "2020-01-01",
+                    "end_iso": None,
+                    "is_current": True,
+                    "duration_months": 80,
+                    "highlights": ["Built services"],
+                    "skills_in_role": [],
+                    "evidence": {},
+                },
+            ],
+        },
+        "education": {
+            "status": "explicit",
+            "items": [
+                {"degree": "bachelor", "degree_raw": "BSc", "field_of_study": "Computer Science"},
+            ],
+        },
+        "projects": {
+            "status": "explicit",
+            "items": [
+                {
+                    "name": "Side Project",
+                    "description": None,
+                    "url": None,
+                    "technologies": [
+                        {"name": "fastapi", "matched_as": "FastAPI", "category": "framework"}
+                    ],
+                },
+            ],
+        },
+        "preferences": {
+            "status": "explicit",
+            "locations": ["berlin"],
+            "remote": True,
+            "relocation": True,
+            "employment_types": ["full_time"],
+            "salary_min": {"amount": 90000.0, "currency": "USD", "period": "year"},
+        },
+    }
+    profile.update(profile_overrides)
+    return {"status": "PARSED", "profile": profile}
 
 
 class TestSkills:
@@ -26,7 +123,9 @@ class TestSkills:
             "analysis": {
                 "skills": {
                     "required": [
-                        {"name": "python"}, {"name": "pytorch"}, {"name": "sql"},
+                        {"name": "python"},
+                        {"name": "pytorch"},
+                        {"name": "sql"},
                     ],
                 },
             },
@@ -38,7 +137,14 @@ class TestSkills:
         assert component.status == "partial"
 
     def test_preferred_contributes(self) -> None:
-        result = score()
+        result = score(candidate=make_candidate_result(
+            skills={"status": "explicit", "items": [
+                {"name": "python", "matched_as": "Python",
+                 "category": "language"},
+                {"name": "docker", "matched_as": "Docker",
+                 "category": "tool"},
+            ]},
+        ))
 
         assert result["breakdown"]["skills_preferred"].points == 10
 
@@ -79,8 +185,7 @@ class TestExperience:
         analysis = {
             "status": "ANALYZED",
             "analysis": {
-                "experience": {"min_years": None, "max_years": None,
-                               "level_word": "senior-level"},
+                "experience": {"min_years": None, "max_years": None, "level_word": "senior-level"},
             },
         }
         result = score(analysis=analysis)
@@ -105,10 +210,14 @@ class TestLocationRemote:
         assert result["breakdown"]["location"].points == 12
 
     def test_remote_job_explicit_onsite_preference_mismatch(self) -> None:
-        candidate = make_candidate_result(preferences={
-            "remote": False, "relocation": True,
-            "locations": ["Berlin"], "employment_types": [],
-        })
+        candidate = make_candidate_result(
+            preferences={
+                "remote": False,
+                "relocation": False,
+                "locations": ["Berlin"],
+                "employment_types": [],
+            }
+        )
         result = score(candidate=candidate)
 
         assert result["breakdown"]["location"].points == 0
@@ -123,7 +232,13 @@ class TestLocationRemote:
                              "remote_eligibility": False},
             },
         }
-        result = score(job=job, analysis=analysis)
+        candidate = make_candidate_result(
+            preferences={
+                "remote": False, "relocation": False,
+                "locations": ["Berlin"], "employment_types": [],
+            }
+        )
+        result = score(job=job, analysis=analysis, candidate=candidate)
 
         assert result["breakdown"]["location"].points == 0
 
@@ -137,10 +252,14 @@ class TestLocationRemote:
                              "remote_eligibility": False},
             },
         }
-        candidate = make_candidate_result(preferences={
-            "remote": None, "relocation": True,
-            "locations": [], "employment_types": [],
-        })
+        candidate = make_candidate_result(
+            preferences={
+                "remote": None,
+                "relocation": True,
+                "locations": [],
+                "employment_types": [],
+            }
+        )
         result = score(job=job, analysis=analysis, candidate=candidate)
 
         assert result["breakdown"]["location"].points == 9
@@ -177,10 +296,12 @@ class TestEducationLadder:
         assert result["breakdown"]["education"].points == 8
 
     def test_one_level_below_partial(self) -> None:
-        candidate = make_candidate_result(education={
-            "status": "explicit",
-            "items": [{"degree": "associate", "degree_raw": "Associate"}],
-        })
+        candidate = make_candidate_result(
+            education={
+                "status": "explicit",
+                "items": [{"degree": "associate", "degree_raw": "Associate"}],
+            }
+        )
         analysis = {
             "status": "ANALYZED",
             "analysis": {"education": {"items": [{"degree": "bachelor"}]}},
@@ -190,9 +311,12 @@ class TestEducationLadder:
         assert result["breakdown"]["education"].points == 3.2
 
     def test_two_levels_below_zero(self) -> None:
-        candidate = make_candidate_result(education={
-            "status": "explicit", "items": [],
-        })
+        candidate = make_candidate_result(
+            education={
+                "status": "explicit",
+                "items": [{"degree": "diploma", "degree_raw": "Diploma"}],
+            }
+        )
         analysis = {
             "status": "ANALYZED",
             "analysis": {"education": {"items": [{"degree": "phd"}]}},
@@ -209,20 +333,22 @@ class TestSalary:
         assert result["breakdown"]["salary"].points == 5
 
     def test_overlap_partial(self) -> None:
+        """When even the offered maximum falls short of the expected minimum,
+        the entire range is below expectations => mismatch."""
         analysis = {
             "status": "ANALYZED",
-            "analysis": {"salary": {"canonical_min": 60000.0,
-                                    "canonical_max": 95000.0}},
+            "analysis": {"salary": {
+                "canonical_min": 60000.0, "canonical_max": 80000.0}},
         }
         result = score(analysis=analysis)
 
-        assert result["breakdown"]["salary"].points == 3
+        assert result["breakdown"]["salary"].points == 0
+        assert "below expected minimum" in result["breakdown"]["salary"].reason
 
     def test_below_expectation_zero(self) -> None:
         analysis = {
             "status": "ANALYZED",
-            "analysis": {"salary": {"canonical_min": 40000.0,
-                                    "canonical_max": 60000.0}},
+            "analysis": {"salary": {"canonical_min": 40000.0, "canonical_max": 60000.0}},
         }
         result = score(analysis=analysis)
 
@@ -231,9 +357,13 @@ class TestSalary:
     def test_currency_mismatch_zero_even_if_high(self) -> None:
         analysis = {
             "status": "ANALYZED",
-            "analysis": {"salary": {"canonical_min": 500000.0,
-                                    "canonical_max": 800000.0,
-                                    "canonical_currency": "INR"}},
+            "analysis": {
+                "salary": {
+                    "canonical_min": 500000.0,
+                    "canonical_max": 800000.0,
+                    "canonical_currency": "INR",
+                }
+            },
         }
         result = score(analysis=analysis)
 
@@ -250,16 +380,31 @@ class TestSalary:
 
 class TestLevelComponent:
     def test_equal_seniority_matched(self) -> None:
-        result = score()
+        analysis = {
+            "status": "ANALYZED",
+            "analysis": {
+                "experience": {"min_years": None, "max_years": None, "level_word": "senior-level"},
+            },
+        }
+        result = score(analysis=analysis)
 
         assert result["breakdown"]["level"].points == 5
 
     def test_adjacent_partial(self) -> None:
-        candidate = make_candidate_result(experience={
-            "status": "explicit", "total_years": 6.0,
-            "items": [{"title": "Lead Engineer", "company": "Acme"}],
-        })
-        result = score(candidate=candidate)
+        candidate = make_candidate_result(
+            experience={
+                "status": "explicit",
+                "total_years": 6.0,
+                "items": [{"title": "Lead Engineer", "company": "Acme"}],
+            }
+        )
+        analysis = {
+            "status": "ANALYZED",
+            "analysis": {
+                "experience": {"min_years": None, "max_years": None, "level_word": "senior-level"},
+            },
+        }
+        result = score(candidate=candidate, analysis=analysis)
 
         assert result["breakdown"]["level"].points == 3
 

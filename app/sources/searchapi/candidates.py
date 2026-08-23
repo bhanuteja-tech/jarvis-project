@@ -101,9 +101,7 @@ def build_search_params(
     ``q`` was supplied.
     """
     source_prefs = preferences.get(_PREFERENCES_KEY)
-    search_prefs = (
-        source_prefs.get(_SEARCH_KEY) if isinstance(source_prefs, Mapping) else None
-    )
+    search_prefs = source_prefs.get(_SEARCH_KEY) if isinstance(source_prefs, Mapping) else None
     if not isinstance(search_prefs, Mapping):
         return {}, []
 

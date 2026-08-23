@@ -21,11 +21,12 @@ from collections.abc import Sequence
 
 from langgraph.graph import END, START, StateGraph
 
-from app.config.settings import get_settings
 from app.candidate.analyzer import ResumeAnalyzer
+from app.config.settings import get_settings
 from app.dedup.cluster import dedupe_jobs
 from app.graph.state import ErrorRecord, GraphState, WarningRecord
 from app.jdunderstanding.analyzer import build_analyzer
+from app.matching.service import match_jobs
 from app.ranking.service import rank_jobs
 from app.sources.base import SourceAdapter
 from app.sources.errors import SourceError
@@ -364,7 +365,7 @@ async def _tailor_resume(state: GraphState) -> dict:
     prefs_raw = (state.get("search_preferences") or {}).get("tailoring")
 
     try:
-        outcome = tailor_resume(
+        outcome = await tailor_resume(
             candidate_result,
             match_results,
             jd_analyses,
@@ -405,7 +406,13 @@ async def _tailor_resume(state: GraphState) -> dict:
 async def _validate_resume(state: GraphState) -> dict:
     """Fail-open Phase-6 truth + ATS validation of the tailored resume."""
     tailored_result = state.get("tailored_resume")
-    should_run, _report = validate_resume_safe(tailored_result)
+    should_run, _report = validate_resume_safe(
+        tailored_result,
+        state.get("candidate_profile"),
+        state.get("match_results"),
+        state.get("jd_analyses"),
+        state.get("jobs"),
+    )
     if not should_run:
         warnings = list(state.get("warnings") or [])
         warnings.append(

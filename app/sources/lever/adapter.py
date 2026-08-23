@@ -101,10 +101,7 @@ def normalize_posting(
         # Verbatim provenance for Phase 2 JD intelligence; deliberately never
         # promoted into requirements/responsibilities by name heuristics.
         "lists": (
-            [
-                {"text": entry.text, "content": entry.content}
-                for entry in posting.lists
-            ]
+            [{"text": entry.text, "content": entry.content} for entry in posting.lists]
             if posting.lists
             else None
         ),
@@ -300,9 +297,7 @@ class LeverAdapter:
 
                 try:
                     jobs.append(
-                        normalize_posting(
-                            posting, company=company, source_created_at=created_at
-                        )
+                        normalize_posting(posting, company=company, source_created_at=created_at)
                     )
                 except SourceError:
                     raise

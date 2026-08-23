@@ -43,9 +43,7 @@ class MatchResult:
             "score": self.score,
             "tier": self.tier,
             "confidence": self.confidence,
-            "breakdown": {
-                key: _serialize(value) for key, value in self.breakdown.items()
-            },
+            "breakdown": {key: _serialize(value) for key, value in self.breakdown.items()},
             "matched_skills": list(self.matched_skills),
             "missing_required": list(self.missing_required),
             "gaps": list(self.gaps),

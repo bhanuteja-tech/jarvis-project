@@ -56,9 +56,7 @@ logger = logging.getLogger(__name__)
 
 SOURCE_NAME = "career_page"
 
-_IDENTITY_NAMESPACE = uuid.uuid5(
-    uuid.NAMESPACE_URL, "https://jarvis.local/career-page/identity"
-)
+_IDENTITY_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://jarvis.local/career-page/identity")
 
 _UNIT_PERIODS = {"hour", "day", "week", "month", "year"}
 _MAX_EMBEDDED_NODES = 10
@@ -185,9 +183,7 @@ def build_salary(posting: Mapping[str, Any]) -> tuple[Salary | None, str | None]
         point = True
     elif isinstance(base, Mapping):
         base_type = str(base.get("@type", "")).lower()
-        currency = currency or first_text(
-            base.get("currency") or base.get("priceCurrency")
-        )
+        currency = currency or first_text(base.get("currency") or base.get("priceCurrency"))
         unit = first_text(base.get("unitText"))
         if unit and unit.lower() in _UNIT_PERIODS:
             period = unit.lower()
@@ -281,7 +277,7 @@ def embedded_job_candidates(soup: Any) -> list[dict[str, Any]]:
         text = tag.string or ""
         match = re.match(r"\s*window\.__INITIAL_STATE__\s*=\s*", text)
         if match:
-            scripts.append(text[match.end():].rstrip().rstrip(";"))
+            scripts.append(text[match.end() :].rstrip().rstrip(";"))
 
     found: list[dict[str, Any]] = []
     for raw in scripts:
@@ -416,11 +412,7 @@ def _verify(bag: SignalBag, dom: DomSignals) -> tuple[str | None, str | None]:
     title = _blank_to_none(bag.get("title"))
     description = _blank_to_none(bag.get("description"))
     if not title or not description:
-        reason = (
-            "listing_page_detected"
-            if dom.internal_job_links >= 5
-            else "insufficient_evidence"
-        )
+        reason = "listing_page_detected" if dom.internal_job_links >= 5 else "insufficient_evidence"
         return reason, None
 
     layers = {bag.layer_of("title"), bag.layer_of("description")}
@@ -431,9 +423,7 @@ def _verify(bag: SignalBag, dom: DomSignals) -> tuple[str | None, str | None]:
     if bag.get("apply_url") and dom.main_text_len >= 200:
         return None, "medium"
 
-    reason = (
-        "listing_page_detected" if dom.internal_job_links >= 5 else "insufficient_evidence"
-    )
+    reason = "listing_page_detected" if dom.internal_job_links >= 5 else "insufficient_evidence"
     return reason, None
 
 
@@ -504,9 +494,7 @@ class CareerPageExtractor:
             return self._failed(exc, warnings)
 
         try:
-            page = await self._fetcher.request_bytes(
-                url, allowed_content_types=PAGE_CONTENT_TYPES
-            )
+            page = await self._fetcher.request_bytes(url, allowed_content_types=PAGE_CONTENT_TYPES)
         except CareerPageError as exc:
             errors.append(exc)
             return self._failed(exc, warnings)
@@ -571,8 +559,7 @@ class CareerPageExtractor:
                     source=SOURCE_NAME,
                     code="ambiguous_postings",
                     message=(
-                        f"page contains {len(postings)} JobPosting nodes; "
-                        "the first was extracted"
+                        f"page contains {len(postings)} JobPosting nodes; the first was extracted"
                     ),
                 )
             )
@@ -618,11 +605,13 @@ class CareerPageExtractor:
         if verdict_reason == "insufficient_evidence" and self._should_try_browser(dom):
             browser_warnings = await self._try_browser(final_url, bag, extras)
             warnings.extend(browser_warnings)
-            browser_used = not browser_warnings or any(
-                w.code != "browser_unavailable" for w in browser_warnings
-            ) and not any(
-                w.code in {"browser_unavailable", "browser_render_failed"}
-                for w in browser_warnings
+            browser_used = (
+                not browser_warnings
+                or any(w.code != "browser_unavailable" for w in browser_warnings)
+                and not any(
+                    w.code in {"browser_unavailable", "browser_render_failed"}
+                    for w in browser_warnings
+                )
             )
             verdict_reason, confidence = _verify(bag, dom)
 
@@ -639,17 +628,21 @@ class CareerPageExtractor:
             return ExtractionResult(
                 status="NO_JOB_DETECTED",
                 reason=verdict_reason,
-                detail=(
-                    f"page did not satisfy the acceptance contract ({verdict_reason})"
-                ),
+                detail=(f"page did not satisfy the acceptance contract ({verdict_reason})"),
                 warnings=tuple(warnings),
                 final_url=final_url,
             )
 
         identity, identity_source = _resolve_identity(extras, dom, canon_final)
         job = self._assemble(
-            bag, extras, canon_final, confidence or "medium", salary, identity,
-            identity_source, browser_used,
+            bag,
+            extras,
+            canon_final,
+            confidence or "medium",
+            salary,
+            identity,
+            identity_source,
+            browser_used,
         )
         logger.info(
             "career job extracted",
@@ -669,9 +662,7 @@ class CareerPageExtractor:
         )
 
     @staticmethod
-    def _failed(
-        exc: SourceError, warnings: list[SourceWarning]
-    ) -> ExtractionResult:
+    def _failed(exc: SourceError, warnings: list[SourceWarning]) -> ExtractionResult:
         return ExtractionResult(
             status="FETCH_FAILED",
             reason=exc.reason or type(exc).__name__,
@@ -708,8 +699,7 @@ class CareerPageExtractor:
                     source=SOURCE_NAME,
                     code="browser_unavailable",
                     message=(
-                        "SPA indicators present but the optional playwright "
-                        "extra is not installed"
+                        "SPA indicators present but the optional playwright extra is not installed"
                     ),
                 )
             ]
@@ -736,9 +726,7 @@ class CareerPageExtractor:
             rendered_soup = BeautifulSoup(rendered.html, "html.parser")
             bag.offer("description", "dom", _main_text(rendered_soup))
         if "apply_url" not in bag:
-            bag.offer(
-                "apply_url", "dom", _best_dom_apply(rendered_signals, rendered.final_url)
-            )
+            bag.offer("apply_url", "dom", _best_dom_apply(rendered_signals, rendered.final_url))
         return []
 
     def _assemble(

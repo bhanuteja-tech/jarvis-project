@@ -36,17 +36,13 @@ class TestContactQuarantine:
         assert evidence
 
     def test_phone_regex_does_not_capture_years(self) -> None:
-        _emails, phones, _links, _ev = extract_contact(
-            "Engineer since Jan 2020 with 2024 project"
-        )
+        _emails, phones, _links, _ev = extract_contact("Engineer since Jan 2020 with 2024 project")
         assert phones == []
 
 
 class TestIdentityHeuristic:
     def test_first_clean_line_becomes_name(self) -> None:
-        name, evidence = extract_identity(
-            ["Jane Doe", "jane@example.com", "Senior Engineer"]
-        )
+        name, evidence = extract_identity(["Jane Doe", "jane@example.com", "Senior Engineer"])
 
         assert name == "Jane Doe"
         assert evidence is not None
@@ -126,9 +122,7 @@ class TestExperienceExtraction:
 
 class TestEducationExtraction:
     def test_full_degree_line(self) -> None:
-        items = extract_education_items(
-            None, "BSc in Computer Science, Acme University, 2015"
-        )
+        items = extract_education_items(None, "BSc in Computer Science, Acme University, 2015")
 
         assert items[0].degree == "bachelor"
         assert items[0].field_of_study.lower().startswith("computer science")
@@ -190,9 +184,7 @@ class TestPreferences:
         assert info.status.value == "explicit"
 
     def test_never_inferred_from_history(self) -> None:
-        info = extract_preferences(
-            "Worked remotely at Acme 2019-2021 on full-time contracts."
-        )
+        info = extract_preferences("Worked remotely at Acme 2019-2021 on full-time contracts.")
 
         assert info.remote is None
         assert info.relocation is None

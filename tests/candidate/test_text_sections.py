@@ -65,6 +65,10 @@ def test_sections_found_listing() -> None:
         "Education\nBSc in Computer Science, 2015\n"
     )
     segmentation = _segment(raw)
-    found = [section.kind.value for section in segmentation.sections if section.blocks or section.kind is not ResumeSectionKind.OTHER]
+    found = [
+        s.kind.value
+        for s in segmentation.sections
+        if s.blocks or s.kind is not ResumeSectionKind.OTHER
+    ]
 
     assert {"summary", "skills", "experience", "education"} <= set(found)

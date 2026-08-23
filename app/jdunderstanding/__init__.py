@@ -21,9 +21,9 @@ from app.jdunderstanding.analyzer import AnalysisResult, JDAnalyzer
 from app.jdunderstanding.llm import DisabledJdLlmClient, JdLlmClient
 from app.jdunderstanding.models import (
     Confidence,
+    Evidence,
     ExtractionMethod,
     ExtractionStatus,
-    Evidence,
     JDAnalysis,
     RequirementLevel,
     SectionKind,

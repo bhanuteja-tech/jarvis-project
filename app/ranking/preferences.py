@@ -61,9 +61,7 @@ _EMPLOYMENT_PATTERNS: tuple[tuple[str, EmploymentType], ...] = (
     ("full time", EmploymentType.FULL_TIME),
 )
 
-_LEVEL_TOKEN_MAP: dict[str, ExperienceLevel] = {
-    level.value: level for level in _LEVEL_LADDER
-}
+_LEVEL_TOKEN_MAP: dict[str, ExperienceLevel] = {level.value: level for level in _LEVEL_LADDER}
 _LEVEL_TOKEN_MAP.update({"graduate": ExperienceLevel.ENTRY, "middle": ExperienceLevel.MID})
 
 
@@ -82,9 +80,7 @@ def normalize_employment(raw: Any) -> EmploymentType | None:
 
 def detect_level(*texts: Any) -> ExperienceLevel | None:
     """Detect the strongest seniority signal across supplied texts."""
-    token_sets = [
-        set(re.findall(r"[a-z]+", str(text).lower())) for text in texts if text
-    ]
+    token_sets = [set(re.findall(r"[a-z]+", str(text).lower())) for text in texts if text]
     for level in _LEVEL_LADDER:
         if any(level.value in tokens for tokens in token_sets):
             return level

@@ -17,13 +17,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+import time
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from app.candidate.analyzer import ResumeAnalyzer
 from app.config.settings import Settings
 from app.jarvis import events as ev
-from app.jarvis.intent import Plan, parse_intent
+from app.jarvis.intent import parse_intent
 from app.jarvis.narrator import narrate
 from app.jarvis.sessions import InMemorySessionStore, Session
 
@@ -39,7 +40,9 @@ class EventEmitter:
         self._send = send
         self._seq = 0
 
-    async def emit(self, event_type: ev.EventType | str, run_id: str | None = None, **data: Any) -> dict:
+    async def emit(
+        self, event_type: ev.EventType | str, run_id: str | None = None, **data: Any
+    ) -> dict:
         self._seq += 1
         envelope = ev.make_event(event_type, seq=self._seq, run_id=run_id, **data)
         await self._send(envelope)
@@ -48,18 +51,18 @@ class EventEmitter:
 
 def default_adapters(settings: Settings) -> list[Any]:
     """Composition root for source adapters (frozen clients, read-only use)."""
-    from app.sources.greenhouse.client import GreenhouseClient
     from app.sources.greenhouse.adapter import GreenhouseAdapter
-    from app.sources.lever.client import LeverClient
+    from app.sources.greenhouse.client import GreenhouseClient
     from app.sources.lever.adapter import LeverAdapter
+    from app.sources.lever.client import LeverClient
 
     adapters: list[Any] = [
         GreenhouseAdapter(GreenhouseClient(settings)),
         LeverAdapter(LeverClient(settings)),
     ]
     if settings.searchapi_api_key.get_secret_value().strip():
-        from app.sources.searchapi.jobs_adapter import SearchApiJobsAdapter
         from app.sources.searchapi.client import SearchApiClient
+        from app.sources.searchapi.jobs_adapter import SearchApiJobsAdapter
 
         adapters.append(SearchApiJobsAdapter(SearchApiClient(settings)))
     return adapters
@@ -123,8 +126,10 @@ class JarvisOrchestrator:
 
             run_id = f"run_{session.session_id[:8]}_{int(time.time() * 1000)}"
             await emitter.emit(
-                ev.EventType.AGENT_STARTED, run_id=run_id,
-                action=plan.action, params=_safe_params(plan.params),
+                ev.EventType.AGENT_STARTED,
+                run_id=run_id,
+                action=plan.action,
+                params=_safe_params(plan.params),
             )
 
             if plan.action == "help":
@@ -150,11 +155,14 @@ class JarvisOrchestrator:
                         merged.update({"tailoring": prefs["tailoring"]})
                         prefs = merged
                 await emitter.emit(
-                    ev.EventType.AGENT_THINKING, run_id=run_id,
+                    ev.EventType.AGENT_THINKING,
+                    run_id=run_id,
                     detail="re-running pipeline with explicit target",
                 )
                 await self._run_discovery(
-                    session, emitter, run_id,
+                    session,
+                    emitter,
+                    run_id,
                     user_params={"user_query": _last_query(session)},
                     pref_overrides=prefs or {},
                     select_hint=plan.reply_hint,
@@ -163,18 +171,23 @@ class JarvisOrchestrator:
 
             if plan.action == "run_discovery":
                 await emitter.emit(
-                    ev.EventType.AGENT_THINKING, run_id=run_id,
+                    ev.EventType.AGENT_THINKING,
+                    run_id=run_id,
                     detail="planning job discovery",
                 )
                 await self._run_discovery(
-                    session, emitter, run_id, user_params=plan.params,
+                    session,
+                    emitter,
+                    run_id,
+                    user_params=plan.params,
                     pref_overrides={},
                     select_hint=plan.reply_hint,
                 )
                 return
 
             await emitter.emit(
-                ev.EventType.ERROR, code="unknown_action",
+                ev.EventType.ERROR,
+                code="unknown_action",
                 message=f"unsupported action {plan.action}",
             )
 
@@ -252,8 +265,7 @@ class JarvisOrchestrator:
             "user_query": user_params.get("user_query"),
             "search_preferences": {
                 **pref_overrides,
-                **({"locations": user_params["locations"]}
-                   if user_params.get("locations") else {}),
+                **({"locations": user_params["locations"]} if user_params.get("locations") else {}),
             },
         }
         if session.candidate_input is not None:
@@ -326,9 +338,7 @@ class JarvisOrchestrator:
         session.append_message("assistant", reply)
 
         result_snapshot = _result_snapshot(final_state)
-        attachments.extend([
-            {"kind": "result_snapshot", **result_snapshot}
-        ])
+        attachments.extend([{"kind": "result_snapshot", **result_snapshot}])
         await self._speak(emitter, run_id, reply, attachments)
         await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
 
@@ -351,7 +361,7 @@ class JarvisOrchestrator:
         text: str,
         attachments: list[dict[str, Any]] | None = None,
     ) -> None:
-        await emitter.emit(ev.EventType.AGENT_SPEAKING if hasattr(ev.EventType, "AGENT_SPEAKING") else "agent_speaking", run_id=run_id)
+        await emitter.emit(ev.EventType.AGENT_SPEAKING, run_id=run_id)
         await emitter.emit(
             ev.EventType.ASSISTANT_MESSAGE,
             run_id=run_id,

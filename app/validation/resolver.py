@@ -31,6 +31,10 @@ def _val(value: Any) -> Any:
 
 def _apply_bracket(container: Any, payload: str) -> tuple[bool, Any]:
     payload = payload.strip()
+    # Field-wrapper tolerance: experience/projects/... are {status, items}
+    # dicts; a numeric index on the wrapper means the items list.
+    if isinstance(container, Mapping) and isinstance(container.get("items"), (list, tuple)):
+        container = container["items"]
     if payload.startswith("name="):
         wanted = payload.split("=", 1)[1].strip().strip("'\"").lower()
         if not isinstance(container, list):
@@ -57,8 +61,13 @@ def resolve_path(profile: Mapping[str, Any], path: str) -> tuple[bool, Any]:
     if not isinstance(profile, Mapping) or not isinstance(path, str) or not path.strip():
         return False, None
 
+    # Strip "resume." namespace prefix — paths are relative to profile root.
+    clean_path = re.sub(r"^resume\.", "", path.strip())
+    if not clean_path:
+        return False, None
+
     current: Any = profile
-    for raw_segment in path.strip().split("."):
+    for raw_segment in clean_path.split("."):
         match = _SEGMENT_RE.match(raw_segment.strip())
         if match is None:
             return False, None
@@ -120,9 +129,7 @@ def gather_evidence_corpus(profile: Mapping[str, Any]) -> list[str]:
 
     education_section = profile.get("education") or {}
     for item in education_section.get("items") or []:
-        texts.extend(
-            str(value) for value in item.values() if isinstance(value, str)
-        )
+        texts.extend(str(value) for value in item.values() if isinstance(value, str))
 
     certifications_section = profile.get("certifications") or {}
     for item in certifications_section.get("items") or []:
@@ -140,8 +147,7 @@ def collect_evidence_refs(tailored_resume: Mapping[str, Any]) -> list[str]:
     summary = tailored_resume.get("summary") or {}
     refs.extend(summary.get("evidence_refs") or [])
 
-    for section_key in ("skills", "experience", "projects", "education",
-                        "certifications"):
+    for section_key in ("skills", "experience", "projects", "education", "certifications"):
         for item in tailored_resume.get(section_key) or []:
             refs.extend(item.get("evidence_refs") or [])
             bullet_ref = item.get("evidence_ref")

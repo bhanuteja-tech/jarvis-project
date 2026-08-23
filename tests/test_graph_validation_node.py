@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from app.graph.workflow import (
-    MATCHING_NODE,
-    TAILOR_NODE,
     VALIDATION_NODE,
     build_workflow,
 )
+from app.models.job import Job
 from app.sources.base import FetchResult
 
 
@@ -40,16 +39,24 @@ def make_candidate_result():
         "status": "PARSED",
         "profile": {
             "profile_id": "pid-v",
-            "skills": {"status": "explicit", "items": [
-                {"name": "python", "matched_as": "Python",
-                 "category": "language"},
-            ]},
-            "experience": {"status": "explicit", "total_years": 5.0,
-                           "items": [
-                {"title": "Data Engineer", "company": "Acme",
-                 "highlights": ["Built python pipelines"],
-                 "duration_months": 60},
-            ]},
+            "skills": {
+                "status": "explicit",
+                "items": [
+                    {"name": "python", "matched_as": "Python", "category": "language"},
+                ],
+            },
+            "experience": {
+                "status": "explicit",
+                "total_years": 5.0,
+                "items": [
+                    {
+                        "title": "Data Engineer",
+                        "company": "Acme",
+                        "highlights": ["Built python pipelines"],
+                        "duration_months": 60,
+                    },
+                ],
+            },
             "education": {"items": []},
             "certifications": {"items": []},
             "projects": {"items": []},
@@ -57,6 +64,23 @@ def make_candidate_result():
             "summary": {"text": None},
         },
     }
+
+
+async def _fail_tailoring(*_args, **_kwargs):
+    raise RuntimeError("tailoring intentionally failed")
+
+
+class StubAdapter:
+    source_name = "stub"
+
+    def __init__(self, jobs=()) -> None:
+
+        self._jobs = tuple(jobs)
+
+    async def fetch_jobs(self, preferences):
+        jobs = [job if isinstance(job, Job) else Job(**job) for job in self._jobs]
+
+        return FetchResult(jobs=tuple(jobs))
 
 
 class TestValidationNodeIntegration:
@@ -74,13 +98,11 @@ class TestValidationNodeIntegration:
         assert VALIDATION_NODE in set(graph.get_graph().nodes.keys())
         report = state["validation_report"]
         assert report["overall_status"] in {"PASS", "WARN", "FAIL"}
-        assert len(report["truth"]["checks"]) >= 9   # T1–T10 (+info rows)
-        assert len(report["ats"]["checks"]) >= 8     # A1–A8
+        assert len(report["truth"]["checks"]) >= 9  # T1–T10 (+info rows)
+        assert len(report["ats"]["checks"]) >= 8  # A1–A8
         assert state["matching_summary"]["evaluated"] >= 1
 
-    async def test_no_tailored_resume_skips_validation_with_warning(
-        self, monkeypatch
-    ) -> None:
+    async def test_no_tailored_resume_skips_validation_with_warning(self, monkeypatch) -> None:
         # Make tailoring fail so tailored_resume is absent downstream.
         monkeypatch.setattr(
             "app.graph.workflow.tailor_resume",
@@ -97,15 +119,10 @@ class TestValidationNodeIntegration:
         )
 
         assert "validation_report" not in state
-        warnings = [
-            w for w in state.get("warnings") or []
-            if w["source"] == "validation"
-        ]
+        warnings = [w for w in state.get("warnings") or [] if w["source"] == "validation"]
         assert any(w["code"] == "validation_skipped_no_resume" for w in warnings)
 
-    async def test_fail_open_on_unexpected_validation_failure(
-        self, monkeypatch
-    ) -> None:
+    async def test_fail_open_on_unexpected_validation_failure(self, monkeypatch) -> None:
         def boom(*_args, **_kwargs):
             raise RuntimeError("validation exploded")
 
@@ -123,15 +140,8 @@ class TestValidationNodeIntegration:
         # Prior phases preserved.
         assert len(state["jobs"]) == 1
         assert "tailored_resume" in state
-        (validation_error,) = [
-            e for e in state["errors"] if e["source"] == "validation"
-        ]
+        (validation_error,) = [e for e in state["errors"] if e["source"] == "validation"]
         assert validation_error["retryable"] is False
-        warnings = [w for w in state.get("warnings") or []
-                    if w["source"] == "validation"]
+        warnings = [w for w in state.get("warnings") or [] if w["source"] == "validation"]
         assert any(w["code"] == "validation_failed" for w in warnings)
         assert "validation_report" not in state
-
-
-async def _fail_tailoring(*_args, **_kwargs):
-    raise RuntimeError("tailoring intentionally failed")

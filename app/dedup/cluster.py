@@ -96,9 +96,7 @@ def _parse_datetime(value: Any) -> datetime | None:
     return None
 
 
-def _select_winner(
-    views: list[Any], members: list[int], jobs: list[Mapping[str, Any]]
-) -> int:
+def _select_winner(views: list[Any], members: list[int], jobs: list[Mapping[str, Any]]) -> int:
     def sort_key(idx: int) -> tuple[int, int, str, str, str]:
         view = views[idx]
         job = jobs[idx]
@@ -115,9 +113,7 @@ def _select_winner(
     return min(members, key=sort_key)
 
 
-def _ordered_members(
-    views: list[Any], members: list[int]
-) -> list[int]:
+def _ordered_members(views: list[Any], members: list[int]) -> list[int]:
     def key(idx: int) -> tuple[int, str, str]:
         view = views[idx]
         return (-SOURCE_RANK.get(view.source, 0), view.source, view.source_job_id)
@@ -272,7 +268,7 @@ def dedupe_jobs(jobs: list[Mapping[str, Any]]) -> DedupOutcome:
         exact_buckets.setdefault((view.company_key, view.title_key), []).append(index)
     for bucket in exact_buckets.values():
         for position, left in enumerate(bucket):
-            for right in bucket[position + 1:]:
+            for right in bucket[position + 1 :]:
                 apply_pair(left, right)
 
     # --- R3: bounded fuzzy pass inside company buckets ---
@@ -288,7 +284,7 @@ def dedupe_jobs(jobs: list[Mapping[str, Any]]) -> DedupOutcome:
             truncated_buckets += 1
             continue
         for position, left in enumerate(company_bucket):
-            for right in company_bucket[position + 1:]:
+            for right in company_bucket[position + 1 :]:
                 if uf.find(left) == uf.find(right):
                     continue  # same cluster already; skip redundant comparison
                 apply_pair(left, right)
@@ -312,9 +308,7 @@ def dedupe_jobs(jobs: list[Mapping[str, Any]]) -> DedupOutcome:
             f"reason={decision.veto_reason}"
         )
         if emitted < _MAX_POTENTIAL_WARNINGS:
-            warnings.append(
-                {"code": "potential_duplicate", "message": message, "source": "dedup"}
-            )
+            warnings.append({"code": "potential_duplicate", "message": message, "source": "dedup"})
         elif emitted == _MAX_POTENTIAL_WARNINGS:
             warnings.append(
                 {
@@ -348,9 +342,7 @@ def dedupe_jobs(jobs: list[Mapping[str, Any]]) -> DedupOutcome:
             if pair <= members_set:
                 cluster_vetoes |= reasons
 
-        merged = _build_merged(
-            jobs, views, members, winner_index, cluster_rule, cluster_vetoes
-        )
+        merged = _build_merged(jobs, views, members, winner_index, cluster_rule, cluster_vetoes)
         results.append((winner_index, merged))
 
     results.sort(key=lambda item: item[0])

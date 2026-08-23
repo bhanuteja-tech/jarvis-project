@@ -31,8 +31,15 @@ class SkillDef:
     negative_context: tuple[str, ...] = ()
 
 
-def _skill(canonical: str, category: SkillCategory, *aliases: str, not_near: tuple[str, ...] = ()) -> SkillDef:
-    return SkillDef(canonical=canonical, category=category, aliases=aliases, negative_context=not_near)
+def _skill(
+    canonical: str,
+    category: SkillCategory,
+    *aliases: str,
+    not_near: tuple[str, ...] = (),
+) -> SkillDef:
+    return SkillDef(
+        canonical=canonical, category=category, aliases=aliases, negative_context=not_near
+    )
 
 
 _REGISTRY: tuple[SkillDef, ...] = (
@@ -75,7 +82,7 @@ _REGISTRY: tuple[SkillDef, ...] = (
     # --- cloud / infrastructure -------------------------------------------
     _skill("aws", SkillCategory.CLOUD, "amazon web services"),
     _skill("azure", SkillCategory.CLOUD, "microsoft azure"),
-    _skill("gcp", SkillCategory.CLOUD, "google cloud platform", "google cloud"),
+    _skill("google cloud platform", SkillCategory.CLOUD, "gcp", "google cloud"),
     _skill("docker", SkillCategory.TOOL),
     _skill("kubernetes", SkillCategory.TOOL, "k8s"),
     _skill("terraform", SkillCategory.TOOL),

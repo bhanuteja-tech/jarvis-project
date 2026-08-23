@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -54,9 +53,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     static_dir = Path(__file__).resolve().parent / "static"
     if static_dir.is_dir():
-        application.mount(
-            "/", StaticFiles(directory=str(static_dir), html=True), name="static"
-        )
+        application.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
 
     # Available immediately (not only within the lifespan) so probes and
     # tests can access wiring without running startup events.

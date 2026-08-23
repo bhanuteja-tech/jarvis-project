@@ -149,17 +149,13 @@ class TestApprovedCorrectionGuards:
         assert router.call_count == 0
 
     async def test_unsupported_parameters_dropped_with_warning(self) -> None:
-        router = ScriptedRouter(
-            json_response(load_searchapi_fixture("google_search_empty.json"))
-        )
+        router = ScriptedRouter(json_response(load_searchapi_fixture("google_search_empty.json")))
         adapter = make_adapter(router)
 
         result = await collect_with(adapter, num=100)
 
         message = next(
-            w.message
-            for w in result.warnings
-            if w.code == "unsupported_parameters_ignored"
+            w.message for w in result.warnings if w.code == "unsupported_parameters_ignored"
         )
         assert "num" in message
 
@@ -176,9 +172,7 @@ class TestPartialDataPolicy:
         assert router.call_count == 0
 
     async def test_structurally_wrong_payload_raises_validation_error(self) -> None:
-        router = ScriptedRouter(
-            json_response(load_searchapi_fixture("malformed_response.json"))
-        )
+        router = ScriptedRouter(json_response(load_searchapi_fixture("malformed_response.json")))
         adapter = make_adapter(router)
 
         with pytest.raises(SourceValidationError):

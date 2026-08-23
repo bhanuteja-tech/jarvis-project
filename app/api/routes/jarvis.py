@@ -39,9 +39,7 @@ async def ws_jarvis(websocket: WebSocket) -> None:
                     "session_id": session.session_id,
                     "jobs_count": len(session.last_state.get("jobs") or []),
                     "matches": len(session.last_state.get("match_results") or []),
-                    "tailored_target_index": tailored_target_index(
-                        session.last_state
-                    ),
+                    "tailored_target_index": tailored_target_index(session.last_state),
                     "validation_status": validation_status(session.last_state),
                 }
                 # Safe artifact snapshot for the workspace views.
@@ -57,13 +55,9 @@ async def ws_jarvis(websocket: WebSocket) -> None:
                 ]
                 _run_artifacts[run_id] = {
                     "jobs": jobs,
-                    "match_results": list(
-                        session.last_state.get("match_results") or []
-                    ),
+                    "match_results": list(session.last_state.get("match_results") or []),
                     "tailored_resume": session.last_state.get("tailored_resume"),
-                    "validation_report": session.last_state.get(
-                        "validation_report"
-                    ),
+                    "validation_report": session.last_state.get("validation_report"),
                 }
 
     try:
@@ -87,12 +81,13 @@ async def parse_resume(body: dict[str, Any]) -> dict[str, Any]:
     result = await analyzer.build_profile(
         {"text": text} if isinstance(text, str) else None
     )
-    if result.status.value == "failed" and result.reason in {
+    status_str = str(getattr(result.status, "value", result.status)).lower()
+    if status_str == "failed" and result.reason in {
         "empty_resume",
         "invalid_candidate_input",
     }:
         raise HTTPException(status_code=400, detail=result.reason)
-    if result.status.value == "failed":
+    if status_str == "failed":
         raise HTTPException(status_code=422, detail=result.reason)
     dump = result.model_dump()
     # PII quarantine: REST responses strip quarantined values.

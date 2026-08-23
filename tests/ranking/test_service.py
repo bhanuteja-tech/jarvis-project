@@ -131,9 +131,7 @@ class TestRankingService:
         first = rank_jobs(jobs, {"soft": {"target_roles": ["ml engineer"]}}, now=NOW)
         second = rank_jobs(jobs, {"soft": {"target_roles": ["ml engineer"]}}, now=NOW)
 
-        assert [r.job_index for r in first.ranked_jobs] == [
-            r.job_index for r in second.ranked_jobs
-        ]
+        assert [r.job_index for r in first.ranked_jobs] == [r.job_index for r in second.ranked_jobs]
 
     def test_no_preferences_neutral_full_scores(self) -> None:
         jobs = [make_job(), make_job(source_job_id="2")]
@@ -146,6 +144,5 @@ class TestRankingService:
         scores = {ranked.score for ranked in outcome.ranked_jobs}
         assert scores == {93.0}
         assert all(
-            ranked.breakdown["freshness"].status == "neutral"
-            for ranked in outcome.ranked_jobs
+            ranked.breakdown["freshness"].status == "neutral" for ranked in outcome.ranked_jobs
         )

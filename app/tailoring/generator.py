@@ -8,9 +8,8 @@ from profile tokens, so violations indicate bugs, never silent fabrications).
 
 from __future__ import annotations
 
-from collections import Counter
-
 from app.candidate.models import CandidateProfile  # noqa: F401 (typing parity)
+from app.dedup.normalize import base_normalize
 from app.tailoring import rules
 from app.tailoring.models import (
     ChangeRecord,
@@ -25,7 +24,7 @@ from app.tailoring.models import (
     TailoringMeta,
 )
 from app.tailoring.validator import TruthinessValidator
-from app.tailoring.views import ExpRef, ProfileView, TargetView
+from app.tailoring.views import ExpRef, ProfileView, ProjRef, TargetView
 
 
 def _skill_path(name: str) -> str:
@@ -49,11 +48,7 @@ def gather_evidence_corpus(profile_view: ProfileView) -> list[str]:
             if value:
                 texts.append(value)
     for education_item in profile_view.education_items:
-        texts.extend(
-            str(value)
-            for value in education_item.values()
-            if isinstance(value, str)
-        )
+        texts.extend(str(value) for value in education_item.values() if isinstance(value, str))
     texts.extend(profile_view.certification_names)
     return texts
 
@@ -94,9 +89,7 @@ def generate_tailored_resume(
                     "ordered skills with JD-required matches first; canonical "
                     "taxonomy naming applied"
                 ),
-                evidence_refs=[
-                    _skill_path(skill.name) for skill, _tag in tagged[:6]
-                ],
+                evidence_refs=[_skill_path(skill.name) for skill, _tag in tagged[:6]],
             )
         )
 
@@ -109,9 +102,7 @@ def generate_tailored_resume(
     tailored_experience: list[TailoredExperienceItem] = []
 
     for source_index in experience_order:
-        item: ExpRef = next(
-            ref for ref in profile_view.experience if ref.index == source_index
-        )
+        item: ExpRef = next(ref for ref in profile_view.experience if ref.index == source_index)
         selected_indices, selection_changes = rules.select_highlights(
             item.highlights,
             item.skill_names,
@@ -122,7 +113,6 @@ def generate_tailored_resume(
         changes.extend(selection_changes)
 
         bullets: list[TailoredBullet] = []
-        seen_in_item: set[str] = set()
         for highlight_index in sorted(selected_indices):
             original = item.highlights[highlight_index]
             normalized = base_normalize(original)
@@ -139,9 +129,7 @@ def generate_tailored_resume(
             seen_bullets.add(normalized)
 
             final_text = original  # verbatim in deterministic mode
-            evidence_ref = (
-                f"resume.experience[{source_index}].highlights[{highlight_index}]"
-            )
+            evidence_ref = f"resume.experience.items[{source_index}].highlights[{highlight_index}]"
             bullets.append(
                 TailoredBullet(
                     index=highlight_index,
@@ -159,9 +147,7 @@ def generate_tailored_resume(
                 company=item.company,
                 date_range_raw=date_range,
                 highlights=bullets,
-                evidence_refs=[
-                    f"resume.experience[{source_index}]"
-                ],
+                evidence_refs=[f"resume.experience.items[{source_index}]"],
             )
         )
 
@@ -173,9 +159,7 @@ def generate_tailored_resume(
         changes.append(project_change)
     tailored_projects: list[TailoredProject] = []
     for source_index in project_indices:
-        project: ProjRef = next(
-            ref for ref in profile_view.projects if ref.index == source_index
-        )
+        project: ProjRef = next(ref for ref in profile_view.projects if ref.index == source_index)
         tailored_projects.append(
             TailoredProject(
                 source_index=source_index,
@@ -183,7 +167,7 @@ def generate_tailored_resume(
                 description=project.description,
                 url=project.url,
                 technologies=list(project.tech_names),
-                evidence_ref=f"resume.projects[{source_index}]",
+                evidence_ref=f"resume.projects.items[{source_index}]",
             )
         )
 
@@ -216,9 +200,7 @@ def generate_tailored_resume(
     total_years_value = total_years
 
     top_matched = [name for name in sorted(matched_skills)][:3]
-    summary_text, summary_refs = rules.build_summary(
-        latest_title, total_years_value, top_matched
-    )
+    summary_text, summary_refs = rules.build_summary(latest_title, total_years_value, top_matched)
     if not validator.is_supported(summary_text):  # defense-in-depth
         warnings.append("generated summary failed truth guard; omitted")
         summary_text = ""
@@ -234,13 +216,10 @@ def generate_tailored_resume(
 
     # ---- unaddressed requirements -----------------------------------------------
     candidate_skill_names = {skill.name for skill in profile_view.skills}
-    unaddressed = rules.unaddressed_requirements(
-        target.required_skills, candidate_skill_names
-    )
+    unaddressed = rules.unaddressed_requirements(target.required_skills, candidate_skill_names)
     if unaddressed:
         warnings.append(
-            "JD requires skills absent from candidate evidence: "
-            + ", ".join(unaddressed)
+            "JD requires skills absent from candidate evidence: " + ", ".join(unaddressed)
         )
 
     return (

@@ -23,8 +23,9 @@ from app.jdunderstanding.text import TextBlock, TextDocument
 
 _HEADING_LEXICON: dict[str, SectionKind] = {
     "responsibilities": SectionKind.RESPONSIBILITIES,
-    "what youll do": SectionKind.RESPONSIBILITIES,
+    "what you ll do": SectionKind.RESPONSIBILITIES,
     "what you will do": SectionKind.RESPONSIBILITIES,
+    "what youll do": SectionKind.RESPONSIBILITIES,
     "your impact": SectionKind.RESPONSIBILITIES,
     "what youll be doing": SectionKind.RESPONSIBILITIES,
     "the role": SectionKind.ABOUT_ROLE,
@@ -42,6 +43,7 @@ _HEADING_LEXICON: dict[str, SectionKind] = {
     "minimum qualifications": SectionKind.REQUIREMENTS,
     "basic qualifications": SectionKind.REQUIREMENTS,
     "must have": SectionKind.REQUIREMENTS,
+    "what we re looking for": SectionKind.REQUIREMENTS,
     "what were looking for": SectionKind.REQUIREMENTS,
     "what youre good at": SectionKind.REQUIREMENTS,
     "qualifications": SectionKind.QUALIFICATIONS,
@@ -97,6 +99,8 @@ def _classify_heading(block_text: str) -> SectionKind | None:
 def _looks_like_heading_para(block: TextBlock) -> bool:
     """Plain-text pseudo-headings: short, no terminal period, not bullets."""
     text = block.text.strip()
+    if text.startswith(("-", "•", "*", "·", "–")):
+        return False
     return (
         block.kind == "para"
         and 0 < len(text) <= 80
@@ -124,9 +128,7 @@ class Segmentation:
 
 
 def segment_document(document: TextDocument) -> Segmentation:
-    sections: list[Section] = [
-        Section(kind=SectionKind.OTHER, label="", line_start=0)
-    ]
+    sections: list[Section] = [Section(kind=SectionKind.OTHER, label="", line_start=0)]
     unrecognized = 0
     line_cursor = 0
 
@@ -140,10 +142,9 @@ def segment_document(document: TextDocument) -> Segmentation:
             kind = _classify_heading(block.text)
             label = block.text.strip()
         elif _looks_like_heading_para(block):
+            is_heading = True
             kind = _classify_heading(block.text)
-            if kind is not None:
-                is_heading = True
-                label = block.text.strip()
+            label = block.text.strip()
 
         if is_heading:
             if kind is None:

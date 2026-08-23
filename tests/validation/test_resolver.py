@@ -8,23 +8,35 @@ from app.validation.resolver import (
     resolve_path,
 )
 
-
 PROFILE = {
     "profile_id": "p1",
     "summary": {"text": "Data engineer."},
-    "skills": {"items": [
-        {"name": "python", "matched_as": "Python", "category": "language"},
-        {"name": "sql", "matched_as": "SQL", "category": "language"},
-    ]},
-    "experience": {"items": [
-        {"title": "DE", "company": "Acme",
-         "date_range_raw": "Jan 2020 - Present",
-         "highlights": ["Built pipelines", "Tuned postgres"]},
-    ]},
-    "projects": {"items": [
-        {"name": "ETL", "description": "python etl", "url": None,
-         "technologies": [{"name": "python"}]},
-    ]},
+    "skills": {
+        "items": [
+            {"name": "python", "matched_as": "Python", "category": "language"},
+            {"name": "sql", "matched_as": "SQL", "category": "language"},
+        ]
+    },
+    "experience": {
+        "items": [
+            {
+                "title": "DE",
+                "company": "Acme",
+                "date_range_raw": "Jan 2020 - Present",
+                "highlights": ["Built pipelines", "Tuned postgres"],
+            },
+        ]
+    },
+    "projects": {
+        "items": [
+            {
+                "name": "ETL",
+                "description": "python etl",
+                "url": None,
+                "technologies": [{"name": "python"}],
+            },
+        ]
+    },
     "education": {"items": [{"degree": "bachelor"}]},
     "certifications": {"items": [{"name": "AWS Certified Solutions Architect"}]},
 }
@@ -46,13 +58,14 @@ class TestResolvePath:
         assert found is True and value == "Acme"
 
     def test_highlight_index(self) -> None:
-        found, value = resolve_path(
-            PROFILE, "resume.experience[0].highlights[1]"
-        )
+        found, value = resolve_path(PROFILE, "resume.experience[0].highlights[1]")
         assert found is True and value == "Tuned postgres"
 
     def test_cert_name_with_spaces(self) -> None:
-        found, value = resolve_path(PROFILE, "resume.certifications.items[name=aws certified solutions architect]")
+        found, value = resolve_path(
+            PROFILE,
+            "resume.certifications.items[name=aws certified solutions architect]",
+        )
         assert found is True
         assert value["name"].startswith("AWS")
 
@@ -83,27 +96,38 @@ class TestCorpusAndRefs:
         corpus = gather_evidence_corpus(PROFILE)
 
         joined = " ".join(corpus).lower()
-        for expected in ("data engineer", "built pipelines", "python",
-                         "aws certified"):
+        for expected in ("data engineer", "built pipelines", "python", "aws certified"):
             assert expected in joined
 
     def test_collect_refs_walks_all_sections(self) -> None:
         tailored = {
             "summary": {"evidence_refs": ["resume.summary.text"]},
             "skills": [{"evidence_refs": ["resume.skills.items[name=python]"]}],
-            "experience": [{
-                "evidence_refs": ["resume.experience[0]"],
-                "highlights": [{"evidence_ref":
-                                "resume.experience[0].highlights[0]"}],
-            }],
+            "experience": [
+                {
+                    "evidence_refs": ["resume.experience[0]"],
+                    "highlights": [{"evidence_ref": "resume.experience[0].highlights[0]"}],
+                }
+            ],
             "projects": [{"evidence_ref": "resume.projects[0]"}],
             "education": [{"evidence_ref": "resume.education.items[0]"}],
-            "certifications": [{"evidence_ref": "resume.certifications.items[name=aws certified solutions architect]"}],
-            "changes": [{"operation": "skill_priority", "section": "skills",
-                         "reason": "r", "evidence_refs": [
-                             "resume.skills.items[name=sql]"]}],
+            "certifications": [
+                {
+                    "evidence_ref": (
+                        "resume.certifications.items[name=aws certified solutions architect]"
+                    )
+                }
+            ],
+            "changes": [
+                {
+                    "operation": "skill_priority",
+                    "section": "skills",
+                    "reason": "r",
+                    "evidence_refs": ["resume.skills.items[name=sql]"],
+                }
+            ],
         }
         refs = collect_evidence_refs(tailored)
 
-        assert len(refs) == 7
+        assert len(refs) == 8
         assert all(isinstance(ref, str) and ref for ref in refs)

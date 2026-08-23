@@ -63,9 +63,7 @@ def rank_jobs(
     for index, payload in survivors[: prefs.soft.limit]:
         scoring = payload["scoring"]
         freshness = {
-            "evidence": (
-                "source_created_at" if features_has_created(payload) else "unavailable"
-            ),
+            "evidence": ("source_created_at" if features_has_created(payload) else "unavailable"),
             "age_hours": _age_hours(payload["features"].created_at, now),
         }
         ranked.append(

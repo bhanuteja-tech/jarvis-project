@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
-
+from app.config.settings import Settings
 from app.jarvis.orchestrator import JarvisOrchestrator
 from app.jarvis.sessions import InMemorySessionStore
-from app.config.settings import Settings
 
 
 class FakeGraph:
@@ -40,32 +38,63 @@ def make_orchestrator(updates, **settings_overrides):
 
 
 GOOD_UPDATES = [
-    {"fetch_sources": {"jobs": [
-        {"source": "greenhouse", "source_job_id": "1",
-         "title": "Data Engineer", "company": "TargetCo",
-         "job_url": "https://x/1"},
-    ]}},
-    {"deduplicate_jobs": {"jobs": [
-        {"source": "greenhouse", "source_job_id": "1",
-         "title": "Data Engineer", "company": "TargetCo",
-         "job_url": "https://x/1"},
-    ]}},
-    {"rank_jobs": {"ranked_jobs": [{"job_index": 0, "score": 70}]},
-     "ranking_summary": {}},
+    {
+        "fetch_sources": {
+            "jobs": [
+                {
+                    "source": "greenhouse",
+                    "source_job_id": "1",
+                    "title": "Data Engineer",
+                    "company": "TargetCo",
+                    "job_url": "https://x/1",
+                },
+            ]
+        }
+    },
+    {
+        "deduplicate_jobs": {
+            "jobs": [
+                {
+                    "source": "greenhouse",
+                    "source_job_id": "1",
+                    "title": "Data Engineer",
+                    "company": "TargetCo",
+                    "job_url": "https://x/1",
+                },
+            ]
+        }
+    },
+    {"rank_jobs": {"ranked_jobs": [{"job_index": 0, "score": 70}]}, "ranking_summary": {}},
     {"analyze_jd": {"jd_analyses": []}, "analysis_errors": []},
-    {"match_candidate_to_jobs": {
-        "match_results": [{"job_index": 0, "score": 70,
-                           "tier": "strong", "confidence": "medium"}]},
+    {
+        "match_candidate_to_jobs": {
+            "match_results": [
+                {"job_index": 0, "score": 70, "tier": "strong", "confidence": "medium"}
+            ]
+        },
         "matching_summary": {},
     },
-    {"tailor_resume": {"status": "tailored", "resume": {
-        "target_job_index": 0,
-        "summary": {"text": "Engineer focused on python.",
-                    "evidence_refs": ["resume.experience[0].title"]},
-        "skills": [], "experience": [], "projects": [],
-        "education": [], "certifications": [],
-        "changes": [], "unaddressed_jd_requirements": ["docker"],
-        "warnings": [], "metadata": {}}}},
+    {
+        "tailor_resume": {
+            "status": "tailored",
+            "resume": {
+                "target_job_index": 0,
+                "summary": {
+                    "text": "Engineer focused on python.",
+                    "evidence_refs": ["resume.experience[0].title"],
+                },
+                "skills": [],
+                "experience": [],
+                "projects": [],
+                "education": [],
+                "certifications": [],
+                "changes": [],
+                "unaddressed_jd_requirements": ["docker"],
+                "warnings": [],
+                "metadata": {},
+            },
+        }
+    },
     {"validate_resume": {"overall_status": "WARN"}},
 ]
 
@@ -76,8 +105,11 @@ async def run_chat(text="find python engineer in berlin", updates=GOOD_UPDATES):
         candidate_redact_pii=True,
     )
     session.candidate_input = None
-    await orchestrator.handle_message(session, {"type": "chat", "text": text},
-                                      send=send)
+
+    async def send(envelope):
+        sent.append(envelope)
+
+    await orchestrator.handle_message(session, {"type": "chat", "text": text}, send=send)
     return sent, session
 
 
@@ -97,8 +129,7 @@ class TestEventOrdering:
 
     async def test_node_events_emitted_for_each_completed_node(self) -> None:
         sent, _session = await run_chat()
-        nodes = [e["data"].get("node") for e in sent
-                 if e["type"] == "workflow_node_completed"]
+        nodes = [e["data"].get("node") for e in sent if e["type"] == "workflow_node_completed"]
 
         assert set(nodes) >= {"fetch_sources", "rank_jobs", "tailor_resume"}
 
@@ -125,27 +156,35 @@ class TestResumeUpload:
     async def test_upload_stores_candidate_input(self) -> None:
         orchestrator, session, sent = make_orchestrator([])
 
+        async def send(envelope):
+            sent.append(envelope)
+
         await orchestrator.handle_message(
             session,
-            {"type": "resume_upload", "name": "resume.txt",
-             "content": "Python engineer with sql experience."},
-            send=sent.append,
+            {
+                "type": "resume_upload",
+                "name": "resume.txt",
+                "content": "Python engineer with sql experience.",
+            },
+            send=send,
         )
 
         assert session.candidate_input is not None
-        tool_completed = [e for e in sent
-                          if e["type"] == "tool_completed"]
-        assert tool_completed and tool_completed[0]["tool"] == "set_resume"
+        tool_completed = [e for e in sent if e["type"] == "tool_completed"]
+        assert tool_completed and tool_completed[0]["data"]["tool"] == "set_resume"
 
     async def test_pdf_rejected_with_unsupported_format(self) -> None:
         orchestrator, session, sent = make_orchestrator([])
+
+        async def send(envelope):
+            sent.append(envelope)
 
         await orchestrator.handle_message(
             session,
             {"type": "resume_upload", "name": "resume.pdf",
              "content": "%PDF-1.4 fake"},
-            send=sent.append,
+            send=send,
         )
 
         errors = [e for e in sent if e["type"] == "error"]
-        assert errors and errors[0]["code"] == "unsupported_format"
+        assert errors and errors[0]["data"]["code"] == "unsupported_format"

@@ -21,7 +21,7 @@ class TestMandatedBoundaryPairs:
             ("C++ and C#", "c++", None),
             ("SQL plus NoSQL exposure", "sql", None),
             ("React and React Native apps", "react native", None),
-            ("Write Pythonic code", "pythonic", None),
+            ("Write Pythonic code", None, "python"),
         ],
     )
     def test_pairs(self, text: str, must_include: str | None, must_exclude: str | None) -> None:

@@ -148,7 +148,9 @@ def build_candidate_view(candidate_result: Mapping[str, Any] | None) -> Candidat
                 skill_names.add(str(tech_name).strip().lower())
 
     education_items = (profile.get("education") or {}).get("items") or []
-    edu_ranks = [rank for rank in (_edu_rank(i.get("degree")) for i in education_items) if rank is not None]
+    edu_ranks = [
+        rank for rank in (_edu_rank(i.get("degree")) for i in education_items) if rank is not None
+    ]
 
     preferences = profile.get("preferences") or {}
     raw_locations = preferences.get("locations") or []
@@ -233,10 +235,10 @@ def build_job_view(
         candidate_analysis = analysis_result.get("analysis")
         if isinstance(candidate_analysis, Mapping):
             analysis = candidate_analysis
-    has_analysis = (
-        analysis is not None
-        and str(_val(analysis_result.get("status"))).lower() in {"analyzed", "partial"}
-    )
+    has_analysis = analysis is not None and str(_val(analysis_result.get("status"))).lower() in {
+        "analyzed",
+        "partial",
+    }
 
     required: set[str] = set()
     preferred: set[str] = set()
@@ -270,7 +272,9 @@ def build_job_view(
 
         education_items = (analysis.get("education") or {}).get("items") or []
         edu_ranks = [
-            rank for rank in (_edu_rank(i.get("degree")) for i in education_items) if rank is not None
+            rank
+            for rank in (_edu_rank(i.get("degree")) for i in education_items)
+            if rank is not None
         ]
         edu_required_rank = max(edu_ranks) if edu_ranks else None
 
@@ -290,9 +294,7 @@ def build_job_view(
 
     location_key_value = dedup_location_key(job_location_text)
     is_remote_job = (
-        location_key_value == "remote"
-        or remote_eligibility is True
-        or work_mode == "remote"
+        location_key_value == "remote" or remote_eligibility is True or work_mode == "remote"
     )
 
     # ---- employment ----------------------------------------------------------

@@ -64,9 +64,9 @@ class TestEnvelopes:
         assert result.reason == "empty_resume"
 
     async def test_oversized_text_fails_hard_no_truncation(self) -> None:
-        analyzer = make_analyzer(candidate_max_chars=500)
+        analyzer = make_analyzer(candidate_max_chars=2_000)
 
-        result = await analyzer.build_profile({"text": "word " * 400})
+        result = await analyzer.build_profile({"text": "word " * 800})
 
         assert result.status == "FAILED"
         assert result.reason == "max_chars_violation"

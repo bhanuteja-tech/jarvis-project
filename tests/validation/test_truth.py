@@ -12,26 +12,35 @@ def make_tailored(**overrides):
             "target_job_index": 0,
             "target_job_ref": {"source": "greenhouse", "source_job_id": "1"},
             "source_profile_id": "p1",
-            "summary": {"text": "Data Engineer, focused on python.",
-                        "evidence_refs": ["resume.experience[0].title"]},
-            "skills": [{"name": "python", "display": "Python",
-                        "requirement": "required",
-                        "evidence_refs":
-                            ["resume.skills.items[name=python]"]}],
-            "experience": [{
-                "source_index": 0,
-                "title": "DE",
-                "company": "Acme",
-                "date_range_raw": "Jan 2020 - Present",
-                "highlights": [{
-                    "index": 0,
-                    "original_text": "Built pipelines",
-                    "final_text": "Built python pipelines",
-                    "evidence_ref":
-                        "resume.experience[0].highlights[0]",
-                }],
-                "evidence_refs": ["resume.experience[0]"],
-            }],
+            "summary": {
+                "text": "Data Engineer, focused on python.",
+                "evidence_refs": ["resume.experience.items[0].title"],
+            },
+            "skills": [
+                {
+                    "name": "python",
+                    "display": "Python",
+                    "requirement": "required",
+                    "evidence_refs": ["resume.skills.items[name=python]"],
+                }
+            ],
+            "experience": [
+                {
+                    "source_index": 0,
+                    "title": "DE",
+                    "company": "Acme",
+                    "date_range_raw": "Jan 2020 - Present",
+                    "highlights": [
+                        {
+                            "index": 0,
+                            "original_text": "Built pipelines",
+                            "final_text": "Built python pipelines",
+                            "evidence_ref": "resume.experience.items[0].highlights[0]",
+                        }
+                    ],
+                    "evidence_refs": ["resume.experience.items[0]"],
+                }
+            ],
             "projects": [],
             "education": [],
             "certifications": [],
@@ -46,17 +55,26 @@ def make_tailored(**overrides):
 PROFILE = {
     "profile_id": "p1",
     "summary": {"text": "Data engineer."},
-    "skills": {"items": [
-        {"name": "python", "matched_as": "Python"},
-        {"name": "sql", "matched_as": "SQL"},
-    ]},
-    "experience": {"items": [
-        {"title": "DE", "company": "Acme",
-         "start_raw": "Jan 2020", "end_raw": "Present",
-         "start_iso": "2020-01-01", "end_iso": None,
-         "duration_months": None,
-         "highlights": ["Built pipelines"]},
-    ]},
+    "skills": {
+        "items": [
+            {"name": "python", "matched_as": "Python"},
+            {"name": "sql", "matched_as": "SQL"},
+        ]
+    },
+    "experience": {
+        "items": [
+            {
+                "title": "DE",
+                "company": "Acme",
+                "start_raw": "Jan 2020",
+                "end_raw": "Present",
+                "start_iso": "2020-01-01",
+                "end_iso": None,
+                "duration_months": None,
+                "highlights": ["Built pipelines"],
+            },
+        ]
+    },
     "projects": {"items": []},
     "education": {"items": [{"degree": "bachelor"}]},
     "certifications": {"items": []},
@@ -124,9 +142,7 @@ class TestT3Refs:
 
     def test_unresolvable_ref_fails(self) -> None:
         tailored = make_tailored()
-        tailored["resume"]["skills"][0]["evidence_refs"] = [
-            "resume.skills.items[name=java]"
-        ]
+        tailored["resume"]["skills"][0]["evidence_refs"] = ["resume.skills.items[name=java]"]
         result = checks_by_name(tailored)
 
         assert result["T3_evidence_refs_resolvable"].status == "failed"
@@ -140,10 +156,14 @@ class TestT4Skills:
 
     def test_unsupported_skill_fails(self) -> None:
         tailored = make_tailored()
-        tailored["resume"]["skills"].append({
-            "name": "pytorch", "display": "PyTorch",
-            "requirement": "additional", "evidence_refs": [],
-        })
+        tailored["resume"]["skills"].append(
+            {
+                "name": "pytorch",
+                "display": "PyTorch",
+                "requirement": "additional",
+                "evidence_refs": [],
+            }
+        )
         result = checks_by_name(tailored)
 
         assert result["T4_unsupported_skills"].status == "failed"
@@ -152,13 +172,16 @@ class TestT4Skills:
 
 class TestT5InsertionGuard:
     def test_missing_required_inserted_fails(self) -> None:
-        match_with_missing = {**MATCH,
-                              "missing_required": ["kubernetes"]}
+        match_with_missing = {**MATCH, "missing_required": ["kubernetes"]}
         tailored = make_tailored()
-        tailored["resume"]["skills"].append({
-            "name": "kubernetes", "display": "Kubernetes",
-            "requirement": "additional", "evidence_refs": [],
-        })
+        tailored["resume"]["skills"].append(
+            {
+                "name": "kubernetes",
+                "display": "Kubernetes",
+                "requirement": "additional",
+                "evidence_refs": [],
+            }
+        )
         result = checks_by_name(tailored, match=match_with_missing)
 
         assert result["T5_missing_skills_not_inserted"].status == "failed"
@@ -175,10 +198,14 @@ class TestT5InsertionGuard:
         match_with_missing = {**MATCH, "missing_required": ["docker"]}
         tailored = make_tailored()
         tailored["resume"]["unaddressed_jd_requirements"] = ["docker"]
-        tailored["resume"]["skills"].append({
-            "name": "docker", "display": "Docker",
-            "requirement": "additional", "evidence_refs": [],
-        })
+        tailored["resume"]["skills"].append(
+            {
+                "name": "docker",
+                "display": "Docker",
+                "requirement": "additional",
+                "evidence_refs": [],
+            }
+        )
         result = checks_by_name(tailored, match=match_with_missing)
 
         # docker was inserted despite being listed missing
@@ -231,9 +258,7 @@ class TestT9PII:
 
     def test_email_leak_fails_without_exposing_value(self) -> None:
         tailored = make_tailored()
-        tailored["resume"]["summary"]["text"] = (
-            "Reach me at secret@corp.com please"
-        )
+        tailored["resume"]["summary"]["text"] = "Reach me at secret@corp.com please"
         result = checks_by_name(tailored)
 
         assert result["T9_pii_absence"].status == "failed"
@@ -244,10 +269,14 @@ class TestT9PII:
 class TestT10Meta:
     def test_llm_rewrite_implies_not_deterministic(self) -> None:
         tailored = make_tailored()
-        tailored["resume"]["changes"].append({
-            "operation": "bullet_rewrite_llm", "section": "experience[0]",
-            "reason": "rewritten", "evidence_refs": [],
-        })
+        tailored["resume"]["changes"].append(
+            {
+                "operation": "bullet_rewrite_llm",
+                "section": "experience[0]",
+                "reason": "rewritten",
+                "evidence_refs": [],
+            }
+        )
         # deterministic_only stays True => inconsistency
         result = checks_by_name(tailored)
 

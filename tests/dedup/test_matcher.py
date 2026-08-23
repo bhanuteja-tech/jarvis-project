@@ -126,12 +126,19 @@ class TestGuardsVetoes:
         assert decision.veto_reason == "V3_employment_type_conflict"
 
     def test_salary_overlap_merges_and_disjoint_blocks(self) -> None:
-        salary_a = {"min_amount": 100000, "max_amount": 140000,
-                    "currency": "USD", "period": "year"}
-        salary_overlap = {"min_amount": 130000, "max_amount": 160000,
-                          "currency": "USD", "period": "year"}
-        salary_far = {"min_amount": 300000, "max_amount": 320000,
-                      "currency": "USD", "period": "year"}
+        salary_a = {"min_amount": 100000, "max_amount": 140000, "currency": "USD", "period": "year"}
+        salary_overlap = {
+            "min_amount": 130000,
+            "max_amount": 160000,
+            "currency": "USD",
+            "period": "year",
+        }
+        salary_far = {
+            "min_amount": 300000,
+            "max_amount": 320000,
+            "currency": "USD",
+            "period": "year",
+        }
 
         overlap = decide(
             view(make_job(salary=salary_a)),

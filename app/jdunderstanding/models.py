@@ -7,36 +7,36 @@ UNKNOWN distinguishable across all fields.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
-class ExtractionMethod(str, Enum):
+class ExtractionMethod(StrEnum):
     DETERMINISTIC = "deterministic"
     SEMANTIC = "semantic"
 
 
-class Confidence(str, Enum):
+class Confidence(StrEnum):
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
 
 
-class ExtractionStatus(str, Enum):
+class ExtractionStatus(StrEnum):
     EXPLICIT = "explicit"
     INFERRED = "inferred"
     UNKNOWN = "unknown"
 
 
-class RequirementLevel(str, Enum):
+class RequirementLevel(StrEnum):
     REQUIRED = "required"
     PREFERRED = "preferred"
     UNKNOWN = "unknown"
 
 
-class SectionKind(str, Enum):
+class SectionKind(StrEnum):
     RESPONSIBILITIES = "responsibilities"
     REQUIREMENTS = "requirements"
     QUALIFICATIONS = "qualifications"
@@ -51,7 +51,7 @@ class SectionKind(str, Enum):
     OTHER = "other"
 
 
-class SkillCategory(str, Enum):
+class SkillCategory(StrEnum):
     LANGUAGE = "language"
     FRAMEWORK = "framework"
     CLOUD = "cloud"
@@ -59,6 +59,7 @@ class SkillCategory(str, Enum):
     TOOL = "tool"
     CONCEPT = "concept"
     SOFT_SKILL = "soft_skill"
+    METHODOLOGY = "methodology"
     DOMAIN = "domain"
 
 
@@ -74,6 +75,12 @@ class Evidence(BaseModel):
 
 class SkillCategoryValue:
     pass
+
+
+class KeywordItem(BaseModel):
+    term: str
+    category: SkillCategory
+    evidence: Evidence
 
 
 class SkillRequirement(BaseModel):

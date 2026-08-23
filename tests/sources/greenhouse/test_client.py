@@ -59,9 +59,7 @@ class TestSuccess:
 
 
 class TestBoardTokenValidation:
-    @pytest.mark.parametrize(
-        "bad_token", ["", "  ", "../etc", "a b", "tok/en", "üñí", "a" * 65]
-    )
+    @pytest.mark.parametrize("bad_token", ["", "  ", "../etc", "a b", "tok/en", "üñí", "a" * 65])
     async def test_invalid_tokens_rejected_without_http(self, bad_token: str) -> None:
         router = ScriptedRouter()
         client = make_client(router)
@@ -135,9 +133,7 @@ class TestRetryableStatuses:
     async def test_server_errors_raise_after_max_attempts(
         self, status_code: int, fake_sleeper: FakeSleeper
     ) -> None:
-        router = ScriptedRouter(
-            *[json_response({"message": "down"}, status_code=status_code)] * 10
-        )
+        router = ScriptedRouter(*[json_response({"message": "down"}, status_code=status_code)] * 10)
         client = make_client(
             router,
             sleeper=fake_sleeper,
@@ -155,9 +151,7 @@ class TestRetryableStatuses:
 
 
 class TestRateLimiting:
-    async def test_429_honors_retry_after_then_succeeds(
-        self, fake_sleeper: FakeSleeper
-    ) -> None:
+    async def test_429_honors_retry_after_then_succeeds(self, fake_sleeper: FakeSleeper) -> None:
         fixture = load_fixture("list_jobs_success.json")
         router = ScriptedRouter(
             json_response(
@@ -192,9 +186,7 @@ class TestRateLimiting:
 
         assert fake_sleeper.delays == [0.25]
 
-    async def test_persistent_429_raises_rate_limit_error(
-        self, fake_sleeper: FakeSleeper
-    ) -> None:
+    async def test_persistent_429_raises_rate_limit_error(self, fake_sleeper: FakeSleeper) -> None:
         router = ScriptedRouter(*[json_response({"message": "still slow"}, status_code=429)] * 10)
         client = make_client(
             router,
@@ -208,6 +200,7 @@ class TestRateLimiting:
 
         assert excinfo.value.attempts == 2
         assert excinfo.value.retryable is True
+
     async def test_http_date_retry_after_falls_back_to_backoff(
         self, fake_sleeper: FakeSleeper
     ) -> None:
@@ -250,9 +243,7 @@ class TestTimeoutsAndNetworkErrors:
         assert excinfo.value.attempts == 2
         assert router.call_count == 2
 
-    async def test_timeout_recovers_on_later_attempt(
-        self, fake_sleeper: FakeSleeper
-    ) -> None:
+    async def test_timeout_recovers_on_later_attempt(self, fake_sleeper: FakeSleeper) -> None:
         fixture = load_fixture("list_jobs_success.json")
         router = ScriptedRouter(connect_timeout, json_response(fixture))
         client = make_client(
@@ -266,9 +257,7 @@ class TestTimeoutsAndNetworkErrors:
         assert len(payload["jobs"]) == 2
         assert router.call_count == 2
 
-    async def test_connection_error_maps_to_network_error(
-        self, fake_sleeper: FakeSleeper
-    ) -> None:
+    async def test_connection_error_maps_to_network_error(self, fake_sleeper: FakeSleeper) -> None:
         router = ScriptedRouter(*[connection_refused] * 5)
         client = make_client(
             router,

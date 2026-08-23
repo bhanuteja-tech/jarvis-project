@@ -109,7 +109,9 @@ class SemanticClaimValidator:
         parts = [p.strip() for p in re.split(r"\s+\w+\s+|\.\s+", normalized) if len(p.strip()) >= 8]
         if not parts:
             return False
-        hits = sum(1 for part in parts if part in self._full or any(part in f for f in self._fragments))
+        hits = sum(
+            1 for part in parts if part in self._full or any(part in f for f in self._fragments)
+        )
         return hits >= max(1, len(parts) - 1)
 
     def filter_claims(self, claims: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:

@@ -221,9 +221,7 @@ def decide(a: JobView, b: JobView) -> Decision:
     if location_conflict:
         # High-similarity pair (same company + compatible title) that differs
         # only by location: labeled veto, never a silent non-merge.
-        return Decision(
-            merged=False, veto_reason="V2_location_mismatch", candidate=True
-        )
+        return Decision(merged=False, veto_reason="V2_location_mismatch", candidate=True)
 
     veto = _first_veto_without_location(a, b)
     if veto is not None:

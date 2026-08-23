@@ -132,9 +132,7 @@ class TestSharedInfraRegression:
         assert excinfo.value.attempts == 2  # initial + 1 retry
         assert router.call_count == 2
 
-    async def test_timeout_maps_to_typed_retryable_error(
-        self, fake_sleeper: FakeSleeper
-    ) -> None:
+    async def test_timeout_maps_to_typed_retryable_error(self, fake_sleeper: FakeSleeper) -> None:
         router = ScriptedRouter(*[connect_timeout] * 5)
         client = make_lever_client(
             router,

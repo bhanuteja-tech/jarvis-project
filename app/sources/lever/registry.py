@@ -70,9 +70,7 @@ class FileSiteRegistry:
                 source="lever",
             )
         sites = {
-            str(site): name
-            for site, name in raw.items()
-            if isinstance(name, str) and name.strip()
+            str(site): name for site, name in raw.items() if isinstance(name, str) and name.strip()
         }
         self._sites = sites
         return sites

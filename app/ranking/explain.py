@@ -47,9 +47,7 @@ class RankingSummary:
 
 def _serialize(value: Any) -> Any:
     if hasattr(value, "__dict__") and not isinstance(value, (dict, list, str, int, float, bool)):
-        return {
-            key: _serialize(item) for key, item in vars(value).items()
-        }
+        return {key: _serialize(item) for key, item in vars(value).items()}
     if isinstance(value, dict):
         return {key: _serialize(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):

@@ -107,9 +107,7 @@ def extract_features(job: Mapping[str, Any], index: int) -> JobFeatures:
     location_known = bool(loc_key)
 
     workplace_type = extra.get("workplace_type")
-    workplace_lower = (
-        str(workplace_type).strip().lower() if isinstance(workplace_type, str) else ""
-    )
+    workplace_lower = str(workplace_type).strip().lower() if isinstance(workplace_type, str) else ""
 
     is_remote: bool | None
     if loc_key == "remote":
@@ -259,10 +257,7 @@ def find_skill(features: JobFeatures, skill: str) -> SkillMatch | None:
                     j += 1
                     continue
                 expected = needle_core[matched]
-                if (
-                    next_token == expected
-                    or next_squash == expected.replace(".", "")
-                ):
+                if next_token == expected or next_squash == expected.replace(".", ""):
                     matched += 1
                     j += 1
                 else:

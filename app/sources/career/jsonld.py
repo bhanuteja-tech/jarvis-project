@@ -42,10 +42,7 @@ def _is_jobposting(node: dict[str, Any]) -> bool:
     if isinstance(node_type, str):
         return node_type.strip().lower() == "jobposting"
     if isinstance(node_type, list):
-        return any(
-            isinstance(t, str) and t.strip().lower() == "jobposting"
-            for t in node_type
-        )
+        return any(isinstance(t, str) and t.strip().lower() == "jobposting" for t in node_type)
     return False
 
 

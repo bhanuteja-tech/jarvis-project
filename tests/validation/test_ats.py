@@ -9,24 +9,30 @@ def make_tailored(**overrides):
     tailored = {
         "resume": {
             "target_job_index": 0,
-            "summary": {"text": "Engineer focused on python.",
-                        "evidence_refs": []},
+            "summary": {"text": "Engineer focused on python.", "evidence_refs": []},
             "skills": [
-                {"name": "python", "display": "Python",
-                 "requirement": "required", "evidence_refs": []},
-                {"name": "sql", "display": "SQL",
-                 "requirement": "preferred", "evidence_refs": []},
+                {
+                    "name": "python",
+                    "display": "Python",
+                    "requirement": "required",
+                    "evidence_refs": [],
+                },
+                {"name": "sql", "display": "SQL", "requirement": "preferred", "evidence_refs": []},
             ],
-            "experience": [{
-                "source_index": 0,
-                "date_range_raw": "Jan 2020 - Present",
-                "highlights": [
-                    {"index": 0,
-                     "original_text": "Built python pipelines",
-                     "final_text": "Built python data pipelines",
-                     "evidence_ref": "resume.experience[0].highlights[0]"},
-                ],
-            }],
+            "experience": [
+                {
+                    "source_index": 0,
+                    "date_range_raw": "Jan 2020 - Present",
+                    "highlights": [
+                        {
+                            "index": 0,
+                            "original_text": "Built python pipelines",
+                            "final_text": "Built python pipelines",
+                            "evidence_ref": "resume.experience[0].highlights[0]",
+                        },
+                    ],
+                }
+            ],
             "projects": [],
             "education": [],
             "certifications": [],
@@ -38,8 +44,17 @@ def make_tailored(**overrides):
 
 PROFILE = {
     "profile_id": "p1",
-    "skills": {"items": [{"name": "python"}]},
-    "experience": {"items": [{"highlights": ["Built python pipelines"]}]},
+    "summary": {"text": "Engineer focused on python."},
+    "skills": {"items": [{"name": "python"}, {"name": "sql"}]},
+    "experience": {
+        "items": [
+            {
+                "title": "Data Engineer",
+                "company": "Acme",
+                "highlights": ["Built python pipelines"],
+            }
+        ]
+    },
 }
 
 ANALYSIS = {
@@ -49,10 +64,12 @@ ANALYSIS = {
             "required": [{"name": "python"}, {"name": "docker"}],
             "preferred": [{"name": "sql"}],
         },
-        "responsibilities": {"items": [
-            {"text": "Build python data pipelines"},
-            {"text": "Operate kubernetes clusters"},
-        ]},
+        "responsibilities": {
+            "items": [
+                {"text": "Build python data pipelines"},
+                {"text": "Operate kubernetes clusters"},
+            ]
+        },
     },
 }
 
@@ -60,9 +77,7 @@ MATCH = {"job_index": 0, "missing_required": ["docker"]}
 
 
 def evaluate(tailored=None, analysis=ANALYSIS, match=MATCH):
-    checks, metrics = evaluate_ats(
-        tailored or make_tailored(), PROFILE, analysis, match
-    )
+    checks, metrics = evaluate_ats(tailored or make_tailored(), PROFILE, analysis, match)
     by_name = {c.name: c for c in checks}
     return by_name, metrics
 
@@ -77,10 +92,15 @@ class TestCoverage:
 
     def test_full_coverage_passes(self) -> None:
         tailored = make_tailored()
-        tailored["resume"]["skills"].insert(0, {
-            "name": "docker", "display": "Docker",
-            "requirement": "required", "evidence_refs": [],
-        })
+        tailored["resume"]["skills"].insert(
+            0,
+            {
+                "name": "docker",
+                "display": "Docker",
+                "requirement": "required",
+                "evidence_refs": [],
+            },
+        )
         by_name, metrics = evaluate(tailored=tailored)
 
         assert metrics.required_coverage_pct == 100.0
@@ -95,9 +115,7 @@ class TestStuffing:
 
     def test_stuffing_suspected_when_inflated(self) -> None:
         tailored = make_tailored(
-            summary={"text":
-                     " ".join(["python"] * 3) + " engineer with python "
-                     "and python again."},
+            summary={"text": " ".join(["python"] * 3) + " engineer with python and python again."},
         )
         by_name, _metrics = evaluate(tailored=tailored)
 
@@ -114,9 +132,7 @@ class TestSectionOrderAndFormat:
 
     def test_over_long_bullet_warns(self) -> None:
         tailored = make_tailored()
-        tailored["resume"]["experience"][0]["highlights"][0]["final_text"] = (
-            "word " * 120
-        )
+        tailored["resume"]["experience"][0]["highlights"][0]["final_text"] = "word " * 120
         by_name, _metrics = evaluate(tailored=tailored)
 
         assert by_name["A7_format_limits"].status == "warning"
@@ -124,9 +140,12 @@ class TestSectionOrderAndFormat:
     def test_highlight_cap_exceeded_warns(self) -> None:
         tailored = make_tailored()
         highlights = [
-            {"index": i, "original_text": f"point {i}",
-             "final_text": f"Built python thing {i}",
-             "evidence_ref": f"resume.experience[0].highlights[{i}]"}
+            {
+                "index": i,
+                "original_text": f"point {i}",
+                "final_text": f"Built python thing {i}",
+                "evidence_ref": f"resume.experience[0].highlights[{i}]",
+            }
             for i in range(12)
         ]
         tailored["resume"]["experience"][0]["highlights"] = highlights
@@ -143,11 +162,13 @@ class TestDateRangeConsistency:
 
     def test_mixed_separators_warn(self) -> None:
         tailored = make_tailored()
-        tailored["resume"]["experience"].append({
-            "source_index": 0,
-            "date_range_raw": "Jan 2020 – Present",
-            "highlights": [],
-        })
+        tailored["resume"]["experience"].append(
+            {
+                "source_index": 0,
+                "date_range_raw": "Jan 2020 – Present",
+                "highlights": [],
+            }
+        )
         by_name, _metrics = evaluate(tailored=tailored)
 
         assert by_name["A8_date_range_consistency"].status == "warning"

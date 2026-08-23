@@ -23,7 +23,6 @@ from __future__ import annotations
 
 from app.candidate.analyzer import CandidateResult, ResumeAnalyzer, build_analyzer
 from app.candidate.models import (
-    CandidateInputError,
     CandidateProfile,
     ContactField,
     ExperienceField,
@@ -31,7 +30,6 @@ from app.candidate.models import (
 )
 
 __all__ = [
-    "CandidateInputError",
     "CandidateProfile",
     "CandidateResult",
     "ContactField",

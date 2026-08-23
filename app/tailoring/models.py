@@ -8,13 +8,13 @@ copied into this artifact.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
-class TailoringStatus(str, Enum):
+class TailoringStatus(StrEnum):
     TAILORED = "tailored"
     PARTIAL = "partial"
     FAILED = "failed"
@@ -23,8 +23,8 @@ class TailoringStatus(str, Enum):
 
 class ChangeRecord(BaseModel):
     operation: str  # skill_priority | highlight_select | project_rank |
-                    # summary_generate | dedupe_bullet | section_omit |
-                    # bullet_rewrite_llm
+    # summary_generate | dedupe_bullet | section_omit |
+    # bullet_rewrite_llm
     section: str
     reason: str
     evidence_refs: list[str] = Field(default_factory=list)

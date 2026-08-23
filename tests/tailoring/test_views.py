@@ -8,25 +8,51 @@ from app.tailoring.views import build_profile_view, resolve_target
 def make_candidate_result(**overrides):
     profile = {
         "profile_id": "pid-1",
-        "skills": {"status": "explicit", "items": [
-            {"name": "python", "matched_as": "Python", "category": "language"},
-            {"name": "sql", "matched_as": "SQL", "category": "language"},
-            {"name": "rust", "matched_as": "Rust", "category": "language"},
-        ]},
-        "experience": {"status": "explicit", "total_years": 6.0, "items": [
-            {"title": "Data Engineer", "company": "Acme",
-             "start_raw": "Jan 2021", "end_raw": "Present",
-             "highlights": ["Built python pipelines", "Managed postgres cluster"]},
-            {"title": "Analyst", "company": "Beta",
-             "start_raw": "2018", "end_raw": "2020",
-             "highlights": ["SQL reporting"]},
-        ]},
-        "projects": {"status": "explicit", "items": [
-            {"name": "Warehouse", "description": "python etl", "url": None,
-             "technologies": [{"name": "python", "matched_as": "python"}]},
-            {"name": "Game", "description": "rust engine", "url": None,
-             "technologies": [{"name": "rust", "matched_as": "rust"}]},
-        ]},
+        "skills": {
+            "status": "explicit",
+            "items": [
+                {"name": "python", "matched_as": "Python", "category": "language"},
+                {"name": "sql", "matched_as": "SQL", "category": "language"},
+                {"name": "rust", "matched_as": "Rust", "category": "language"},
+            ],
+        },
+        "experience": {
+            "status": "explicit",
+            "total_years": 6.0,
+            "items": [
+                {
+                    "title": "Data Engineer",
+                    "company": "Acme",
+                    "start_raw": "Jan 2021",
+                    "end_raw": "Present",
+                    "highlights": ["Built python pipelines", "Managed postgres cluster"],
+                },
+                {
+                    "title": "Analyst",
+                    "company": "Beta",
+                    "start_raw": "2018",
+                    "end_raw": "2020",
+                    "highlights": ["SQL reporting"],
+                },
+            ],
+        },
+        "projects": {
+            "status": "explicit",
+            "items": [
+                {
+                    "name": "Warehouse",
+                    "description": "python etl",
+                    "url": None,
+                    "technologies": [{"name": "python", "matched_as": "python"}],
+                },
+                {
+                    "name": "Game",
+                    "description": "rust engine",
+                    "url": None,
+                    "technologies": [{"name": "rust", "matched_as": "rust"}],
+                },
+            ],
+        },
         "education": {"items": [{"degree": "bachelor"}]},
         "certifications": {"items": [{"name": "AWS Certified Solutions Architect"}]},
         "summary": {"text": "Data engineer with python focus."},
@@ -52,15 +78,18 @@ ANALYSIS = {
             "required": [{"name": "python"}, {"name": "sql"}, {"name": "docker"}],
             "preferred": [{"name": "airflow"}],
         },
-        "responsibilities": {"items": [
-            {"text": "Build python data pipelines"},
-            {"text": "Operate postgres warehouses"},
-        ]},
+        "responsibilities": {
+            "items": [
+                {"text": "Build python data pipelines"},
+                {"text": "Operate postgres warehouses"},
+            ]
+        },
     },
 }
 
-JOBS = [{"source": "greenhouse", "source_job_id": "1",
-         "title": "Data Engineer", "company": "TargetCo"}]
+JOBS = [
+    {"source": "greenhouse", "source_job_id": "1", "title": "Data Engineer", "company": "TargetCo"}
+]
 
 
 class TestProfileView:
@@ -95,8 +124,7 @@ class TestTargetResolution:
         assert resolution.target.job_index == 0
         assert resolution.target.title == "Data Engineer"
         assert "docker" in resolution.target.required_skills
-        assert "build python data pipelines" in \
-            resolution.target.responsibilities_text.lower()
+        assert "build python data pipelines" in resolution.target.responsibilities_text.lower()
 
     def test_explicit_override_valid(self) -> None:
         resolution = resolve_target([MATCH], [ANALYSIS], JOBS, 0)

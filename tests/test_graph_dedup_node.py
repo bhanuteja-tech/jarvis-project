@@ -42,10 +42,7 @@ class StubAdapter:
 
         if self._error is not None:
             raise self._error
-        jobs = [
-            job if isinstance(job, Job) else Job(**job)
-            for job in self._jobs
-        ]
+        jobs = [job if isinstance(job, Job) else Job(**job) for job in self._jobs]
         return FetchResult(jobs=tuple(jobs))
 
 
@@ -93,9 +90,7 @@ class TestDedupNodeIntegration:
         assert "lever" in kinds
         assert len(state["jobs"]) == 1
 
-    async def test_fail_open_passthrough_on_unexpected_dedup_failure(
-        self, monkeypatch
-    ) -> None:
+    async def test_fail_open_passthrough_on_unexpected_dedup_failure(self, monkeypatch) -> None:
         def boom(_jobs):
             raise RuntimeError("dedup exploded")
 

@@ -24,6 +24,7 @@ from app.sources.career.errors import (
     RobotsUnavailableError,
 )
 from app.sources.career.fetch import ROBOTS_CONTENT_TYPES, GuardedFetcher
+from app.sources.errors import SourceHTTPError
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +69,7 @@ class RobotsGate:
                 url=url,
             )
 
-    async def _evaluate(
-        self, host_root: str, target_url: str
-    ) -> tuple[bool, list[SourceWarning]]:
+    async def _evaluate(self, host_root: str, target_url: str) -> tuple[bool, list[SourceWarning]]:
         warnings: list[SourceWarning] = []
         robots_url = urljoin(host_root + "/", "robots.txt")
 
@@ -80,9 +79,23 @@ class RobotsGate:
                 allowed_content_types=ROBOTS_CONTENT_TYPES,
                 max_redirects=3,
             )
+        except SourceHTTPError as exc:
+            if exc.status_code == 404:
+                # RFC 9309: a missing robots.txt imposes no restrictions.
+                logger.info(
+                    "robots.txt absent; no restrictions",
+                    extra={"source": "career_page", "operation": "robots", "url": robots_url},
+                )
+                return True, warnings
+            logger.warning(
+                "robots.txt unreachable",
+                extra={"source": "career_page", "operation": "robots", "host": host_root},
+                exc_info=exc,
+            )
+            return self._handle_unavailable(warnings)
         except RobotsUnavailableError:
             raise
-        except Exception as exc:  # transport/HTTP failures of robots itself
+        except Exception as exc:  # transport failures of robots itself
             logger.warning(
                 "robots.txt unreachable",
                 extra={"source": "career_page", "operation": "robots", "host": host_root},
@@ -98,9 +111,12 @@ class RobotsGate:
             logger.warning("robots.txt unparseable", extra={"url": robots_url})
             return self._handle_unavailable(warnings, cause=exc)
 
-        allowed = parser.can_fetch(_UA_TOKEN, target_url) or parser.can_fetch(
-            "*", target_url
-        )
+        # RFC 9309 group selection: the most specific matching user-agent
+        # group governs. stdlib robotparser already unions every applicable
+        # group, so querying with our product token alone is correct — the
+        # wildcard fallback must NOT be able to override our own group's
+        # Disallow rules.
+        allowed = parser.can_fetch(_UA_TOKEN, target_url)
         if not allowed:
             logger.info(
                 "robots.txt disallows path",
@@ -117,8 +133,7 @@ class RobotsGate:
                     source="career_page",
                     code="robots_unavailable_proceeded",
                     message=(
-                        "robots.txt could not be retrieved; permissive mode "
-                        "allowed the fetch"
+                        "robots.txt could not be retrieved; permissive mode allowed the fetch"
                     ),
                 )
             )

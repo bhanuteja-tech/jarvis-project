@@ -54,9 +54,7 @@ class TestCoreFeatures:
         assert features.is_remote is True
 
     def test_employment_from_field_and_schedule_fallback(self) -> None:
-        direct = extract_features(
-            make_job(employment_type="Regular Full Time (Salary)"), 0
-        )
+        direct = extract_features(make_job(employment_type="Regular Full Time (Salary)"), 0)
         via_schedule = extract_features(
             make_job(extra={"detected_extensions": {"schedule": "Internship"}}),
             0,
@@ -71,9 +69,7 @@ class TestCoreFeatures:
         assert senior.level is ExperienceLevel.SENIOR
 
     def test_naive_source_created_at_is_none(self) -> None:
-        features = extract_features(
-            make_job(source_created_at="2026-08-01T09:30:00"), 0
-        )
+        features = extract_features(make_job(source_created_at="2026-08-01T09:30:00"), 0)
 
         assert features.created_at is None
 
@@ -103,16 +99,12 @@ class TestSkillMatching:
         assert find_skill(features, "python") is not None
 
     def test_node_dot_js_cross_form(self) -> None:
-        features = extract_features(
-            make_job(description="Familiarity with nodejs ecosystem."), 0
-        )
+        features = extract_features(make_job(description="Familiarity with nodejs ecosystem."), 0)
 
         assert find_skill(features, "node.js") is not None
 
     def test_c_plus_plus_boundary_kept(self) -> None:
-        features = extract_features(
-            make_job(description="Strong c++ background required."), 0
-        )
+        features = extract_features(make_job(description="Strong c++ background required."), 0)
 
         assert find_skill(features, "c++") is not None
         assert find_skill(features, "c") is None

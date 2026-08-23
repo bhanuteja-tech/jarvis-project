@@ -19,13 +19,13 @@ Core invariants:
 
 from __future__ import annotations
 
+from app.tailoring.models import ChangeRecord, TailoredResume, TailoringResult
 from app.tailoring.service import TailoringOutcome, tailor_resume
 from app.tailoring.validator import (
     DisabledTailoringLlmClient,
     TailoringLlmClient,
     TruthinessValidator,
 )
-from app.tailoring.models import ChangeRecord, TailoredResume, TailoringResult
 
 __all__ = [
     "ChangeRecord",

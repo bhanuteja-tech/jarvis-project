@@ -36,10 +36,7 @@ class TestCanonicalizeUrl:
         assert canonicalize_url("https://e.com:8443/j").endswith(":8443/j")
 
     def test_host_lowercased_www_preserved(self) -> None:
-        assert (
-            canonicalize_url("https://WWW.Example.COM/J")
-            == "https://www.example.com/J"
-        )
+        assert canonicalize_url("https://WWW.Example.COM/J") == "https://www.example.com/J"
 
     def test_no_percent_renormalization_damage(self) -> None:
         url = "https://e.com/j/a%2Fb"
