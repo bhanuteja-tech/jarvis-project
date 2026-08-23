@@ -56,6 +56,8 @@ class GraphState(TypedDict, total=False):
     matching_summary: dict[str, Any]
     # Phase 5 (additive): TailoringResult dump (status + tailored resume).
     tailored_resume: dict[str, Any]
+    # Phase 6 (additive): ValidationReport for the tailored resume.
+    validation_report: dict[str, Any]
 
 
 __all__ = ["ErrorRecord", "GraphState", "WarningRecord"]

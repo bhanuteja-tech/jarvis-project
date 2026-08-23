@@ -38,8 +38,27 @@ rewriting behind `TailoringLlmClient`, default OFF, unverifiable rewrites
 rejected. Fail-open `tailor_resume` node after matching;
 `tailored_resume` additive state key. PII excluded from output.
 
-Next phases (6+): Truth/ATS Validation, Product Integration.
+Phase 6 (Truth + ATS Validation) is IMPLEMENTED: `app/validation` —
+read-only validation of `tailored_resume`: T1–T10 truth checks (token
+containment re-verified independently of Phase 5's guard, original-text
+fidelity, evidence-ref resolvability, unsupported-skill detection,
+missing-required insertion guard, employer/title/date consistency,
+project/technology consistency, duplicate bullets, PII absence counts-
+only, metadata consistency) => overall FAIL; A1–A8 advisory ATS checks
+(required/preferred coverage %, responsibility token coverage, keyword
+counts table, stuffing suspicion ≥3 & >2×, section order, format caps,
+date-range separators) => at most WARN. Fail-open `validate_resume` node
+after tailoring; single additive state key `validation_report`.
+
+Next phases (7): Product Integration.
 Adzuna was intentionally excluded from Phase 1.
+
+## Validation specifics
+
+- Read-only: never regenerates/repairs the tailored resume; reports only.
+- Truth failures FAIL the report; ATS findings cap at WARN.
+- T9 PII check reports counts only — captured values never appear in
+  results, warnings, logs, or errors.
 
 ## Tailoring specifics
 

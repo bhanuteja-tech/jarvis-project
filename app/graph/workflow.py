@@ -30,6 +30,10 @@ from app.ranking.service import rank_jobs
 from app.sources.base import SourceAdapter
 from app.sources.errors import SourceError
 from app.tailoring.service import tailor_resume
+from app.validation.service import (
+    validate_resume as validate_resume_service,
+)
+from app.validation.service import validate_resume_safe
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,7 @@ RANK_NODE = "rank_jobs"
 JD_NODE = "analyze_jd"
 MATCHING_NODE = "match_candidate_to_jobs"
 TAILOR_NODE = "tailor_resume"
+VALIDATION_NODE = "validate_resume"
 
 
 def _error_record_from_exception(adapter: SourceAdapter, exc: BaseException) -> ErrorRecord:
@@ -397,8 +402,61 @@ async def _tailor_resume(state: GraphState) -> dict:
     return {"tailored_resume": outcome.result.model_dump()}
 
 
+async def _validate_resume(state: GraphState) -> dict:
+    """Fail-open Phase-6 truth + ATS validation of the tailored resume."""
+    tailored_result = state.get("tailored_resume")
+    should_run, _report = validate_resume_safe(tailored_result)
+    if not should_run:
+        warnings = list(state.get("warnings") or [])
+        warnings.append(
+            WarningRecord(
+                source="validation",
+                code="validation_skipped_no_resume",
+                message="no tailored resume available; validation skipped",
+            )
+        )
+        return {"warnings": warnings}
+
+    try:
+        outcome = validate_resume_service(
+            tailored_result,
+            state.get("candidate_profile"),
+            state.get("match_results"),
+            state.get("jd_analyses"),
+            state.get("jobs"),
+        )
+    except Exception as exc:  # noqa: BLE001 - fail-open contract
+        logger.exception(
+            "validation failed; all prior state preserved",
+            extra={"source": "validation", "operation": "validate_resume"},
+        )
+        error = ErrorRecord(
+            source="validation",
+            kind=type(exc).__name__,
+            retryable=False,
+            message=f"unexpected validation failure; state preserved: {exc}",
+            endpoint=None,
+            attempts=0,
+            status_code=None,
+        )
+        warnings = list(state.get("warnings") or [])
+        warnings.append(
+            WarningRecord(
+                source="validation",
+                code="validation_failed",
+                message=f"validation failed ({exc})",
+            )
+        )
+        return {
+            "errors": [*(state.get("errors") or []), error],
+            "warnings": warnings,
+        }
+
+    return {"validation_report": outcome.report.to_dict()}
+
+
 def build_workflow(adapters: Sequence[SourceAdapter]):
-    """Compile the Phase-1..5 discovery graph around the given adapters."""
+    """Compile the Phase-1..6 discovery graph around the given adapters."""
     fetch_sources = _make_fetch_sources_node(adapters)
 
     builder = StateGraph(GraphState)
@@ -409,6 +467,7 @@ def build_workflow(adapters: Sequence[SourceAdapter]):
     builder.add_node(JD_NODE, _analyze_jd)
     builder.add_node(MATCHING_NODE, _match_candidate_to_jobs)
     builder.add_node(TAILOR_NODE, _tailor_resume)
+    builder.add_node(VALIDATION_NODE, _validate_resume)
     builder.add_edge(START, FETCH_SOURCES_NODE)
     builder.add_edge(START, CANDIDATE_NODE)
     builder.add_edge(FETCH_SOURCES_NODE, DEDUP_NODE)
@@ -416,7 +475,8 @@ def build_workflow(adapters: Sequence[SourceAdapter]):
     builder.add_edge(RANK_NODE, JD_NODE)
     builder.add_edge(JD_NODE, MATCHING_NODE)
     builder.add_edge(MATCHING_NODE, TAILOR_NODE)
-    builder.add_edge(TAILOR_NODE, END)
+    builder.add_edge(TAILOR_NODE, VALIDATION_NODE)
+    builder.add_edge(VALIDATION_NODE, END)
     # Independent parallel candidate branch (Phase 3).
     builder.add_edge(CANDIDATE_NODE, END)
     return builder.compile()
@@ -430,5 +490,6 @@ __all__ = [
     "MATCHING_NODE",
     "RANK_NODE",
     "TAILOR_NODE",
+    "VALIDATION_NODE",
     "build_workflow",
 ]
