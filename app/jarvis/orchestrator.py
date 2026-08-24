@@ -2,7 +2,7 @@
 
 A thin orchestration layer around the frozen compiled LangGraph workflow.
 Each user message yields at most one deterministic plan. The graph is the
-only execution engine; the orchestrator never duplicates Phase 1–6 logic.
+only execution engine; the orchestrator never duplicates Phase 1â€“6 logic.
 
 Streaming contract:
 - workflow progress comes from ``graph.astream(state, stream_mode="updates")``
@@ -16,6 +16,8 @@ Streaming contract:
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping
@@ -82,6 +84,7 @@ class JarvisOrchestrator:
         self._llm = llm_client if settings.jarvis_assistant_llm_enabled else None
         self._graph_factory = graph_factory or self._default_graph_factory
         self._current_task: asyncio.Task | None = None
+        self._run_counter = 0
         self._semaphore = asyncio.Semaphore(
             max(1, getattr(settings, "jarvis_max_concurrent_runs", 4))
         )
@@ -122,9 +125,21 @@ class JarvisOrchestrator:
             plan = parse_intent(text)
 
             # Cancel any in-flight run: one active run per connection.
-            await self._cancel(emitter, quiet=True)
+            # Replacement is announced (non-quiet) so clients can render it.
+            had_active = self._current_task is not None and not self._current_task.done()
+            await self._cancel(emitter, quiet=not had_active)
+            if had_active:
+                await emitter.emit(
+                    ev.EventType.RUN_CANCELLED,
+                    code="replaced_by_new_request",
+                    message="Previous request replaced by a new one.",
+                )
 
-            run_id = f"run_{session.session_id[:8]}_{int(time.time() * 1000)}"
+            self._run_counter += 1
+            run_id = (
+                f"run_{session.session_id[:8]}_{self._run_counter:04d}_"
+                f"{time.time_ns()}"
+            )
             await emitter.emit(
                 ev.EventType.AGENT_STARTED,
                 run_id=run_id,
@@ -159,13 +174,16 @@ class JarvisOrchestrator:
                     run_id=run_id,
                     detail="re-running pipeline with explicit target",
                 )
-                await self._run_discovery(
-                    session,
-                    emitter,
+                self._spawn_run(
                     run_id,
-                    user_params={"user_query": _last_query(session)},
-                    pref_overrides=prefs or {},
-                    select_hint=plan.reply_hint,
+                    lambda: self._run_discovery(
+                        session,
+                        emitter,
+                        run_id,
+                        user_params={"user_query": _last_query(session)},
+                        pref_overrides=prefs or {},
+                        select_hint=plan.reply_hint,
+                    ),
                 )
                 return
 
@@ -175,13 +193,16 @@ class JarvisOrchestrator:
                     run_id=run_id,
                     detail="planning job discovery",
                 )
-                await self._run_discovery(
-                    session,
-                    emitter,
+                self._spawn_run(
                     run_id,
-                    user_params=plan.params,
-                    pref_overrides={},
-                    select_hint=plan.reply_hint,
+                    lambda: self._run_discovery(
+                        session,
+                        emitter,
+                        run_id,
+                        user_params=plan.params,
+                        pref_overrides={},
+                        select_hint=plan.reply_hint,
+                    ),
                 )
                 return
 
@@ -198,37 +219,76 @@ class JarvisOrchestrator:
         message: Mapping[str, Any],
         emitter: EventEmitter,
     ) -> None:
-        content = message.get("content")
-        name = str(message.get("name") or "resume.txt")
-        if (
-            not isinstance(content, str)
-            or not content.strip()
-            or len(content) > self._settings.candidate_max_chars
-        ):
-            await emitter.emit(
-                ev.EventType.ERROR,
-                code="invalid_resume",
-                message="resume must be non-empty plain text within the size limit",
-            )
-            return
-        lowered = name.lower()
-        if not lowered.endswith((".txt", ".md")) and message.get("explicit_text") is not True:
-            await emitter.emit(
-                ev.EventType.ERROR,
-                code="unsupported_format",
-                message="only .txt/.md resumes are supported (PDF/DOCX unsupported)",
-            )
-            return
+        """Store a resume for this session.
+
+        Two accepted shapes:
+        - ``{name, content, explicit_text: true}``  legacy plain-text path
+        - ``{name, data_base64}``                   PDF/DOCX/TXT/MD file;
+          bytes run through the document-extraction layer before the frozen
+          text parser sees them.
+        """
+        from app.jarvis.document_parser import DocumentParseError, extract
 
         analyzer = ResumeAnalyzer(self._settings)
+        name = str(message.get("name") or "resume.txt")
+        data_b64 = message.get("data_base64")
+
+        if isinstance(data_b64, str) and data_b64:
+            try:
+                raw = base64.b64decode(data_b64, validate=True)
+            except (binascii.Error, ValueError):
+                await emitter.emit(
+                    ev.EventType.ERROR,
+                    code="invalid_document",
+                    message="the uploaded file could not be decoded",
+                )
+                return
+            try:
+                extracted = extract(
+                    data=raw,
+                    filename=name,
+                    max_bytes=self._settings.max_resume_upload_bytes,
+                )
+            except DocumentParseError as exc:
+                await emitter.emit(ev.EventType.ERROR, code=exc.code, message=exc.message)
+                return
+            content = extracted.text
+        else:
+            content = message.get("content")
+            lowered = name.lower()
+            if (
+                not isinstance(content, str)
+                or not content.strip()
+                or len(content) > self._settings.candidate_max_chars
+            ):
+                await emitter.emit(
+                    ev.EventType.ERROR,
+                    code="invalid_resume",
+                    message="resume must be non-empty plain text within the size limit",
+                )
+                return
+            if not lowered.endswith((".txt", ".md")) and message.get("explicit_text") is not True:
+                await emitter.emit(
+                    ev.EventType.ERROR,
+                    code="unsupported_format",
+                    message="only .txt/.md resumes are supported without file upload",
+                )
+                return
+
         result = await analyzer.build_profile({"text": content})
 
         if result.status in {"FAILED", "SKIPPED"}:
-            await emitter.emit(
-                ev.EventType.ERROR,
-                code=result.reason or "resume_failed",
-                message="resume could not be parsed",
+            reason = result.reason or "resume_failed"
+            message_map = {
+                "max_chars_violation": (
+                    "file_too_large",
+                    "this resume exceeds the supported length after extraction",
+                ),
+            }
+            code, friendly = message_map.get(
+                reason, (reason, "resume could not be parsed")
             )
+            await emitter.emit(ev.EventType.ERROR, code=code, message=friendly)
             return
 
         session.candidate_input = {"text": content}
@@ -327,6 +387,25 @@ class JarvisOrchestrator:
             except asyncio.CancelledError:
                 await emitter.emit(ev.EventType.RUN_CANCELLED, run_id=run_id)
                 raise
+            except Exception as exc:  # noqa: BLE001 - fail-open integration contract
+                # A node failure must surface as a TYPED error event instead
+                # of crashing the socket; prior state stays intact.
+                logger.exception(
+                    "workflow failed; preserving prior state",
+                    extra={"source": "orchestrator", "operation": "run_discovery"},
+                )
+                session.last_state = final_state
+                await emitter.emit(
+                    ev.EventType.ERROR,
+                    run_id=run_id,
+                    code="workflow_failed",
+                    message=(
+                        f"The workflow hit a {type(exc).__name__} and stopped "
+                        "early. Your previous results are unchanged."
+                    ),
+                )
+                await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
+                return
             finally:
                 if self._current_task is task:
                     self._current_task = None
@@ -338,9 +417,49 @@ class JarvisOrchestrator:
         session.append_message("assistant", reply)
 
         result_snapshot = _result_snapshot(final_state)
-        attachments.extend([{"kind": "result_snapshot", **result_snapshot}])
-        await self._speak(emitter, run_id, reply, attachments)
+        await self._speak(
+            emitter, run_id, reply, attachments, result_snapshot=result_snapshot
+        )
         await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
+
+    # ------------------------------------------------------------------
+    def _spawn_run(self, run_id: str, factory: Callable[[], Any]) -> None:
+        """Execute a run as a tracked background task.
+
+        Runs no longer block the connection loop: the next client message can
+        arrive while a run streams, which is what makes replacement and
+        explicit cancellation real rather than nominal. Any escape from the
+        guarded coroutine becomes a typed ERROR event.
+        """
+
+        async def _guarded() -> None:
+            try:
+                await factory()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - last-resort typed failure
+                logger.exception(
+                    "run crashed outside workflow streaming",
+                    extra={"source": "orchestrator", "operation": "run"},
+                )
+
+        task = asyncio.create_task(_guarded(), name=f"jarvis-run-{run_id}")
+        self._current_task = task
+
+        def _cleanup(done: asyncio.Task) -> None:
+            if self._current_task is done:
+                self._current_task = None
+
+        task.add_done_callback(_cleanup)
+
+    async def wait_for_run(self) -> None:
+        """Driver/test helper: wait until the active run task settles."""
+        task = self._current_task
+        if task is not None and not task.done():
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
 
     async def _cancel(self, emitter: EventEmitter, *, quiet: bool = False) -> None:
         task = self._current_task
@@ -360,14 +479,27 @@ class JarvisOrchestrator:
         run_id: str | None,
         text: str,
         attachments: list[dict[str, Any]] | None = None,
+        *,
+        result_snapshot: dict[str, Any] | None = None,
     ) -> None:
         await emitter.emit(ev.EventType.AGENT_SPEAKING, run_id=run_id)
-        await emitter.emit(
-            ev.EventType.ASSISTANT_MESSAGE,
-            run_id=run_id,
-            text=text,
-            attachments=attachments or [],
-        )
+        data: dict[str, Any] = {
+            "text": text,
+            "attachments": attachments or [],
+        }
+        # Canonical location for the workspace snapshot. The legacy
+        # attachments entry is intentionally NOT duplicated here.
+        if result_snapshot is not None:
+            data["result_snapshot"] = result_snapshot
+            data["attachments"] = [
+                att
+                for att in (attachments or [])
+                if not (
+                    isinstance(att, Mapping)
+                    and str(att.get("kind", "")).startswith("result_snapshot")
+                )
+            ]
+        await emitter.emit(ev.EventType.ASSISTANT_MESSAGE, run_id=run_id, **data)
 
 
 def _label_for(node: str) -> str:
@@ -379,22 +511,45 @@ def _label_for(node: str) -> str:
 def _result_snapshot(final_state: Mapping[str, Any]) -> dict[str, Any]:
     """Safe artifact snapshot for the frontend workspace (PII-free).
 
-    Includes only structured Phase 4–6 artifacts plus minimal job echo
-    fields. Never includes identity/contact/errors-with-PII.
+    Includes only structured Phase 4â€“6 artifacts plus minimal job echo
+    fields with STABLE identities (``job_key`` from the canonical Job.id or
+    source-level identity â€” never positional-only). Array position is kept
+    as ``__index`` for match association, but identity does not depend on it.
+    Never includes identity/contact/errors-with-PII.
     """
-    jobs = [
-        {
+    jobs: list[dict[str, Any]] = []
+    for index, job in enumerate(final_state.get("jobs") or []):
+        if not isinstance(job, Mapping):
+            continue
+        job_key = job.get("id") or (
+            f"{job.get('source')}:{job.get('source_job_id')}"
+            if job.get("source") and job.get("source_job_id")
+            else f"pos:{index}"
+        )
+        jobs.append({
+            "__index": index,
+            "job_key": job_key,
             "title": job.get("title"),
             "company": job.get("company"),
             "location": job.get("location"),
+            "employment_type": job.get("employment_type"),
             "job_url": job.get("job_url"),
-        }
-        for job in final_state.get("jobs") or []
-        if isinstance(job, Mapping)
-    ]
+        })
+
+    match_results: list[Any] = []
+    for match in final_state.get("match_results") or []:
+        if isinstance(match, Mapping) and isinstance(match.get("job_index"), int):
+            index = match["job_index"]
+            enriched = {**match}
+            if 0 <= index < len(jobs):
+                enriched["job_key"] = jobs[index]["job_key"]
+            match_results.append(enriched)
+        else:
+            match_results.append(match)
+
     return {
         "jobs": jobs,
-        "match_results": list(final_state.get("match_results") or []),
+        "match_results": match_results,
         "tailored_resume": final_state.get("tailored_resume"),
         "validation_report": final_state.get("validation_report"),
     }

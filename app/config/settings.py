@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     #: When True, quarantined contact/PII values are stripped from the built
     #: profile after construction; ``redacted`` is set on the profile.
     candidate_redact_pii: bool = False
+    #: Maximum raw resume upload size (PDF/DOCX/TXT/MD) accepted by the
+    #: document-extraction layer. Checked BEFORE any parsing work.
+    max_resume_upload_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
 
     # --- Phase 5: Resume tailoring ------------------------------------------
     #: Maximum kept highlights per tailored experience item.
@@ -101,6 +104,13 @@ class Settings(BaseSettings):
     jarvis_max_concurrent_runs: int = Field(default=4, ge=1, le=64)
     jarvis_assistant_llm_enabled: bool = False
     jarvis_ws_path: str = "/ws/jarvis"
+    #: Deterministic FIFO retention cap for completed-run stores (result +
+    #: artifacts). Oldest runs are evicted; nothing is persisted.
+    jarvis_max_stored_runs: int = Field(default=100, ge=1, le=10_000)
+    #: Comma-separated extra origins accepted by the WS same-origin gate.
+    #: Same-host and localhost origins are always allowed; empty Origin
+    #: (non-browser clients) is allowed for tests and tooling.
+    jarvis_ws_allow_origins: str = ""
 
     log_level: str = "INFO"
 

@@ -38,15 +38,21 @@ def narrate(state: Mapping[str, Any] | None) -> tuple[str, list[dict[str, Any]]]
     if matches:
         lines.append("Top matches:")
         for match in matches[:3]:
-            index = match["job_index"]
+            index = match.get("job_index")
+            if not isinstance(index, int):
+                continue
+            score = match.get("score")
+            tier = match.get("tier", "scored")
+            confidence = match.get("confidence", "n/a")
             title = None
             company = None
-            if index < len(jobs):
+            if 0 <= index < len(jobs):
                 title = jobs[index].get("title")
                 company = jobs[index].get("company")
+            score_text = f"{score:g}/100" if isinstance(score, (int, float)) else "n/a"
             lines.append(
                 f"  • #{index + 1} {title or 'Untitled'} at {company or 'Unknown'} — "
-                f"{match['score']:g}/100 ({match['tier']}, {match['confidence']} confidence)"
+                f"{score_text} ({tier}, {confidence} confidence)"
             )
 
     resume = tailored_result.get("resume")

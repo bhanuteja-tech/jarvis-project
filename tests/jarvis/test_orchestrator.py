@@ -110,6 +110,7 @@ async def run_chat(text="find python engineer in berlin", updates=GOOD_UPDATES):
         sent.append(envelope)
 
     await orchestrator.handle_message(session, {"type": "chat", "text": text}, send=send)
+    await orchestrator.wait_for_run()  # runs are tracked background tasks now
     return sent, session
 
 

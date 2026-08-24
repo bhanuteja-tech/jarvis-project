@@ -1,42 +1,53 @@
-// Futuristic AI-agent avatar: layered SVG + CSS states + optional rAF
-// particles. All animation is event/state driven; particles run only while
-// the avatar is in an active state and are disabled under reduced-motion.
+// Advanced SVG avatar controller — THE primary active avatar.
+// Layered SVG + CSS state classes + optional rAF particles. All motion is
+// event/state driven; particles run only during pipeline states and are
+// disabled under prefers-reduced-motion.
 
 import { ParticleField } from "./particles.js";
 
+export const AVATAR_STATES = [
+  "idle", "listening", "thinking", "searching", "analyzing",
+  "matching", "tailoring", "validating", "speaking", "success", "error",
+];
+
 const STATE_CLASS = "avatar-state";
+const PARTICLE_STATES = new Set([
+  "thinking", "searching", "analyzing", "matching", "tailoring", "validating",
+]);
 
 export class AvatarController {
   constructor(container) {
     this.container = container;
     this.reducedMotion =
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    container.innerHTML = AVATAR_SVG;
+    container.classList.add("avatar-stage");
+    container.innerHTML = `<div class="particle-layer"></div>${AVATAR_SVG}`;
     this.svg = container.querySelector("svg");
-    this.core = container.querySelector(".core");
     this.particles = new ParticleField(container.querySelector(".particle-layer"));
+    this._state = null;
     this.setState("idle");
   }
 
-  setState(state) {
-    if (this._state === state) return;
-    this._state = state;
+  setState(next) {
+    if (!AVATAR_STATES.includes(next) || this._state === next) return false;
+    this._state = next;
 
-    const root = this.svg;
-    for (const cls of Array.from(root.classList)) {
-      if (cls.startsWith(STATE_CLASS)) root.classList.remove(cls);
+    for (const cls of Array.from(this.svg.classList)) {
+      if (cls.startsWith(STATE_CLASS)) this.svg.classList.remove(cls);
     }
-    root.classList.add(`${STATE_CLASS}-${state}`);
+    // The CSS targets `.avatar-state-<state>` on the svg root.
+    this.svg.classList.add(`${STATE_CLASS}-${next}`);
 
-    const activeStates = new Set([
-      "thinking", "searching", "analyzing", "matching",
-      "tailoring", "validating", "executing",
-    ]);
-    if (!this.reducedMotion && activeStates.has(state)) {
-      this.particles.start(state);
+    if (!this.reducedMotion && PARTICLE_STATES.has(next)) {
+      this.particles.start(next);
     } else {
       this.particles.stop();
     }
+    return true;
+  }
+
+  get state() {
+    return this._state;
   }
 }
 

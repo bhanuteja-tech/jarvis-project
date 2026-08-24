@@ -1,41 +1,106 @@
-/* Avatar: SVG state-driven animations + particles (rAF only). */
+/* ============================================================
+   Avatar: SVG core + orbit + waveform + scan line, driven by
+   avatar-state-* classes. rAF particles handled in particles.js.
+   States: idle listening thinking searching analyzing matching
+           tailoring validating speaking success error
+   ============================================================ */
 
-#avatar-container { width:76px; height:76px; position:relative; }
+.avatar-stage {
+  width: 96px; height: 96px; position: relative;
+  filter: drop-shadow(0 0 18px rgba(88, 166, 255, 0.12));
+}
 
-.avatar-state-idle .core { animation: breathe 4s ease-in-out infinite; }
-@keyframes breathe { 50% { transform: scale(1.05); } }
-.avatar-state-idle .halo { stroke-opacity: .1; transition: stroke-opacity 1s; }
+.particle-layer { position: absolute; inset: 0; pointer-events: none; }
 
+/* ---------- shared transitions ---------- */
+.avatar-stage svg { width: 100%; height: 100%; }
+.avatar-stage .core { transition: stroke-width var(--speed); }
+.avatar-stage .halo { transition: stroke-opacity 1s ease; }
+.avatar-stage .waveform { transition: opacity var(--speed); }
+
+/* ---------- IDLE: soft breathing glow ---------- */
+.avatar-state-idle .core { animation: breathe 4.5s ease-in-out infinite; transform-origin: 100px 88px; }
+@keyframes breathe { 50% { transform: scale(1.045); } }
+.avatar-state-idle .halo { stroke-opacity: .10; }
+
+/* ---------- LISTENING: waveform + green energy ---------- */
 .avatar-state-listening .waveform { opacity: 1 !important; }
-.avatar-state-listening .wf { animation: wave .9s infinite alternate; }
-.avatar-state-listening .wf:nth-child(2n) { animation-delay: .15s; }
-.avatar-state-listening .wf:nth-child(3n) { animation-delay: .3s; }
-@keyframes wave { from { height: 6px; } to { height: 28px; } }
-.avatar-state-listening .eye { fill: #3fb950 !important; }
+.avatar-state-listening .wf { animation: wave .85s infinite alternate ease-in-out; transform-origin: center bottom; }
+.avatar-state-listening .wf:nth-child(2n) { animation-delay: .14s; }
+.avatar-state-listening .wf:nth-child(3n) { animation-delay: .28s; }
+.avatar-state-listening .eye { fill: #7ee2a0 !important; }
+.avatar-state-listening .halo { stroke-opacity: .35 !important; animation: halo-pulse 1.6s infinite; }
+@keyframes wave { from { transform: scaleY(.4); } to { transform: scaleY(1.5); } }
+@keyframes halo-pulse { 50% { stroke-opacity: .55; } }
 
-.avatar-state-thinking .scan-line,
-.avatar-state-analyzing .scan-line { animation: scan 1.4s infinite alternate ease-in-out; opacity: .7 !important; }
-@keyframes scan { from { transform: translateY(-16px); } to { transform: translateY(16px); } }
-
-.avatar-state-searching .orbit-ring { animation: rotate 5s linear infinite; transform-origin: 100px 100px; }
+/* ---------- THINKING: slow dual-orbit + scan ---------- */
+.avatar-state-thinking .orbit-ring { animation: rotate 7s linear infinite; transform-origin: 100px 100px; }
+.avatar-state-thinking .scan-line { opacity: .55 !important; animation: scan 1.8s infinite alternate ease-in-out; }
 @keyframes rotate { to { transform: rotate(360deg); } }
+@keyframes scan { from { transform: translateY(-15px); } to { transform: translateY(15px); } }
 
-.avatar-state-matching .face { animation: match-glow 1.2s infinite; }
+/* ---------- SEARCHING: fast scanning ring ---------- */
+.avatar-state-searching .orbit-ring { animation: rotate 2.6s linear infinite; transform-origin: 100px 100px; }
+.avatar-state-searching .orbit-dot { fill: #a5d6ff !important; }
+.avatar-state-searching .scan-line { opacity: .7 !important; animation: scan 1s infinite alternate linear; }
+
+/* ---------- ANALYZING: horizontal data sweep ---------- */
+.avatar-state-analyzing .scan-line { opacity: .9 !important; animation: analyze-sweep 1.3s infinite alternate ease-in-out; }
+.avatar-state-analyzing .eye { animation: eye-flicker 1.1s infinite steps(2); }
+@keyframes analyze-sweep {
+  from { transform: translateY(-22px) scaleX(.72); opacity: .45; }
+  to   { transform: translateY(22px) scaleX(1); opacity: .95; }
+}
+@keyframes eye-flicker { 50% { opacity: .55; } }
+
+/* ---------- MATCHING: converging orbit pulses ---------- */
+.avatar-state-matching .face { animation: match-glow 1.25s infinite; }
+.avatar-state-matching .orbit-ring { animation: converge 2.2s infinite alternate ease-in-out; transform-origin: 100px 100px; }
 @keyframes match-glow { 50% { filter: brightness(1.35); } }
+@keyframes converge { from { transform: scale(1); } to { transform: scale(.86); } }
 
-.avatar-state-tailoring .core { animation: tailor-pulse .8s infinite alternate; }
-@keyframes tailor-pulse { to { stroke-width: 4; } }
+/* ---------- TAILORING: precise structured pulse ---------- */
+.avatar-state-tailoring .core { animation: tailor-pulse .9s infinite alternate ease-in-out; }
+.avatar-state-tailoring .orbit-ring { animation: rotate 4.5s linear infinite reverse; transform-origin: 100px 100px; }
+@keyframes tailor-pulse { to { stroke-width: 4.5; } }
 
-.avatar-state-validating .halo { animation: verify-ring 1s infinite alternate; stroke-opacity:.4 !important; }
-@keyframes verify-ring { from { r: 50; } to { r: 55; } }
+/* ---------- VALIDATING: verification ring sweep ---------- */
+.avatar-state-validating .halo { animation: verify 1.1s infinite alternate ease-in-out; stroke-opacity: .5 !important; }
+.avatar-state-validating .eye { fill: #d6c46a !important; }
+@keyframes verify { from { stroke-width: 6; stroke-dasharray: 40 260; } to { stroke-width: 9; stroke-dasharray: 240 60; } }
 
+/* ---------- SPEAKING: mouth + waveform ---------- */
 .avatar-state-speaking .waveform { opacity: 1 !important; }
-.avatar-state-speaking .wf { animation: wave .6s infinite alternate; }
-.avatar-state-speaking .mouth { animation: talk .4s infinite alternate; }
-@keyframes talk { 50% { d: path('M86 108 Q100 100 114 108'); } }
+.avatar-state-speaking .wf { animation: wave .55s infinite alternate ease-in-out; }
+.avatar-state-speaking .wf:nth-child(2n+1) { animation-delay: .12s; }
+.avatar-state-speaking .mouth { animation: talk .38s infinite alternate; }
+@keyframes talk {
+  from { d: path("M86 104 Q100 112 114 104"); }
+  to   { d: path("M86 104 Q100 97 114 104"); }
+}
 
-.avatar-state-done .eye { fill: #3fb950 !important; }
-.avatar-state-done .core { animation: success-sweep 1s ease-out 1 forwards; }
-@keyframes success-sweep { from { filter: brightness(2); } to { filter: brightness(1); } }
+/* ---------- SUCCESS: green completion sweep ---------- */
+.avatar-state-success .eye { fill: #7ee2a0 !important; }
+.avatar-state-success .core { animation: success-sweep 1.1s ease-out 1 both; }
+.avatar-state-success .halo { stroke-opacity: .5 !important; stroke: #3fb950; animation: halo-fade 2.2s ease-out 1 both; }
+@keyframes success-sweep { from { filter: brightness(2.1); } to { filter: brightness(1); } }
+@keyframes halo-fade { from { stroke-opacity: .8; } to { stroke-opacity: .3; } }
 
-.avatar-state-error .eye, .avatar-state-error .mouth { fill: var(--err) !important; stroke: var(--err) !important; }
+/* ---------- ERROR: controlled red pulse ---------- */
+.avatar-state-error .eye,
+.avatar-state-error .mouth { stroke: var(--err, #f85149) !important; fill: var(--err, #f85149) !important; }
+.avatar-state-error .core { animation: err-pulse 1.05s ease-in-out infinite; }
+.avatar-state-error .halo { stroke-opacity: .45 !important; stroke: #f85149; animation: err-halo 1.05s infinite; }
+@keyframes err-pulse { 50% { transform: scale(1.04); } }
+@keyframes err-halo { 50% { stroke-opacity: .75; } }
+
+/* ---------- Reduced motion: keep state color cues only ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .avatar-stage .core, .avatar-stage .halo, .avatar-stage .orbit-ring,
+  .avatar-stage .scan-line, .avatar-stage .wf, .avatar-stage .mouth,
+  .avatar-stage .eye {
+    animation: none !important;
+    transition: opacity .2s ease;
+    opacity: 1;
+  }
+}
