@@ -22,6 +22,11 @@ export const NODE_LABELS = {
   match_candidate_to_jobs: "Matching your experience",
   tailor_resume: "Tailoring your resume",
   validate_resume: "Validating the result",
+  // Phase 11 AI-engine pseudo-steps (driven by real routing events only)
+  llm_router: "Routing AI request",
+  llm_provider: "AI provider selected",
+  llm_stream: "Generating response",
+  llm_complete: "Response complete",
 };
 
 // Top-bar stage pill text per active node — only real node events drive it.
@@ -60,6 +65,26 @@ const state = {
   },
 
   avatar: { state: "idle" }, // see avatar.js STATE list
+
+  // Phase 11: AI engine / multi-model control surface (safe metadata only).
+  llm: {
+    enabled: false,
+    reachable: false,
+    provider: "",
+    model: "",
+    routingEnabled: false,
+    configuredProviders: [],
+    capabilities: [],
+    modelAvailable: false,
+    healthStatus: "",
+    preferredProvider: "",
+    fallbackProviders: [],
+    providers: [], // catalog rows from /api/llm/providers
+    activeRequestProvider: "",
+    activeRequestModel: "",
+    streaming: false,
+    tokensStreamed: 0,
+  },
 
   voice: {
     listening: false,
@@ -125,13 +150,14 @@ export function beginRun(runId) {
   return replaced; // true when this run silently replaced an in-flight one
 }
 
-export function markNodeStarted(node) {
+export function markNodeStarted(node, labelOverride) {
   state.run.currentNode = node;
   state.run.branch = node === "build_candidate_profile" ? "candidate" : "discovery";
   state.run.stage = STAGE_BY_NODE[node] || null;
   const entry = findActivity(node);
   if (entry) {
     entry.status = "active";
+    if (labelOverride) entry.label = labelOverride;
     entry.startedAt = performance.now();
     if (entry.elapsedMs != null) entry.elapsedMs = null; // restarted
   }
@@ -224,6 +250,22 @@ export function setAvatarState(next) {
   state.avatar.state = next;
   notify();
   return true;
+}
+
+// ---- llm engine (Phase 11) ------------------------------------------------------------
+export function setLlm(patch) {
+  Object.assign(state.llm, patch);
+  notify();
+}
+
+export function setPreferredProvider(name) {
+  state.llm.preferredProvider = String(name || "");
+  notify();
+}
+
+export function setFallbackProviders(list) {
+  state.llm.fallbackProviders = (Array.isArray(list) ? list : []).slice(0, 6);
+  notify();
 }
 
 // ---- upload --------------------------------------------------------------------------

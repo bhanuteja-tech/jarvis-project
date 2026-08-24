@@ -49,6 +49,23 @@
           <p class="muted">Upload a .txt / .md resume first so matches use your real profile.</p>
         </div>
       </details>
+      <details class="help-menu" id="ai-engine">
+        <summary class="engine-trigger" aria-label="AI engine status"
+                 title="AI engine status">
+          <span class="conn-dot" id="ai-dot" aria-hidden="true"></span>
+          <span class="engine-label">AI ENGINE</span>
+        </summary>
+        <div class="help-pop engine-pop" role="region" aria-label="AI engine details">
+          <p class="help-title">AI Engine</p>
+          <div id="ai-engine-body" class="ai-engine-body">
+            <p class="muted ai-loading">Checking…</p>
+          </div>
+          <div class="ai-engine-actions">
+            <button type="button" id="ai-models-btn" class="btn">Change model</button>
+            <button type="button" id="ai-test-btn" class="btn">Test connection</button>
+          </div>
+        </div>
+      </details>
     </div>
   </header>
 
@@ -145,6 +162,55 @@
       <button type="button" class="icon-btn" id="match-close" aria-label="Close match explanation">✕</button>
     </header>
     <div id="match-body" class="drawer-body"></div>
+  </aside>
+
+  <!-- AI engine model-control drawer -->
+  <aside id="ai-drawer" class="match-drawer ai-drawer" role="dialog" aria-modal="false"
+         aria-labelledby="ai-drawer-title" hidden>
+    <header class="drawer-head">
+      <h3 id="ai-drawer-title">AI Engine</h3>
+      <button type="button" class="icon-btn" id="ai-close" aria-label="Close AI engine settings">✕</button>
+    </header>
+    <div id="ai-drawer-body" class="drawer-body">
+      <section class="ai-section">
+        <h4 class="resume-section-title">Active</h4>
+        <div id="ai-active" class="ai-active"></div>
+      </section>
+
+      <section class="ai-section">
+        <h4 class="resume-section-title">Intelligent routing</h4>
+        <label class="routing-toggle">
+          <input type="checkbox" id="ai-routing-enabled" />
+          <span>Let Jarvis pick and fall back automatically</span>
+        </label>
+      </section>
+
+      <section class="ai-section">
+        <h4 class="resume-section-title">Preferred provider</h4>
+        <label class="sr-only" for="ai-preferred-select">Preferred provider</label>
+        <select id="ai-preferred-select" class="ai-select"></select>
+      </section>
+
+      <section class="ai-section">
+        <h4 class="resume-section-title">Fallback chain</h4>
+        <div class="fallback-editor">
+          <label class="sr-only" for="ai-fallback-select">Add fallback provider</label>
+          <select id="ai-fallback-select" class="ai-select"></select>
+          <button type="button" id="ai-fallback-add" class="btn">Add</button>
+        </div>
+        <ol id="ai-fallback-list" class="fallback-list"></ol>
+      </section>
+
+      <section class="ai-section">
+        <h4 class="resume-section-title">Provider health</h4>
+        <ul id="ai-provider-health" class="provider-health"></ul>
+      </section>
+
+      <div class="ai-drawer-actions">
+        <button type="button" id="ai-save-prefs" class="btn btn--primary">Save preferences</button>
+        <button type="button" id="ai-test-btn2" class="btn">Test connection</button>
+      </div>
+    </div>
   </aside>
 
   <script type="module" src="/js/app.js"></script>

@@ -70,7 +70,28 @@ export function mapEvent(envelope) {
 
     case "token":
       // Real provider streaming only; render incrementally when present.
-      return { token: typeof data.text === "string" ? data.text : null };
+      return {
+        token: typeof data.text === "string" ? data.text : null,
+        llmProvider: typeof data.provider === "string" ? data.provider : "",
+        llmModel: typeof data.model === "string" ? data.model : "",
+      };
+
+    case "llm_provider_selected":
+      return {
+        aiSelected: {
+          provider: typeof data.provider === "string" ? data.provider : "",
+          model: typeof data.model === "string" ? data.model : "",
+        },
+      };
+
+    case "llm_fallback":
+      return {
+        aiFallback: {
+          from: typeof data.from === "string" ? data.from : "",
+          to: typeof data.to === "string" ? data.to : "",
+          code: typeof data.code === "string" ? data.code : "provider_error",
+        },
+      };
 
     case "agent_speaking":
       return { avatar: "speaking" };

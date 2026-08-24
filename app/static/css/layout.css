@@ -71,6 +71,29 @@
 }
 .help-pop .muted { font-size: 11.5px; margin: 8px 0 0; }
 
+/* AI engine status card */
+.engine-trigger {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; min-height: 32px; border-radius: 999px;
+  border: 1px solid var(--line); cursor: pointer; list-style: none;
+  color: var(--muted); font-size: 11px; letter-spacing: .14em;
+}
+.engine-trigger::-webkit-details-marker { display: none; }
+#ai-engine[open] .engine-trigger { color: var(--accent); border-color: var(--accent-glow); }
+#ai-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+#ai-engine.is-connected #ai-dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(63,185,80,.15); }
+#ai-engine.is-unreachable #ai-dot { background: var(--err); box-shadow: 0 0 0 3px rgba(248,81,73,.15); }
+.ai-engine-body { display: grid; gap: 5px; font-size: 12.5px; margin-bottom: 10px; }
+.ai-row { display: flex; justify-content: space-between; gap: 10px; }
+.ai-row .k { color: var(--dim); letter-spacing: .05em; text-transform: uppercase; font-size: 10.5px; padding-top: 2px; }
+.ai-row .v { color: var(--text); overflow-wrap: anywhere; text-align: right; }
+.mode-badge {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  border: 1px solid var(--line); color: var(--muted);
+}
+.mode-badge.on { color: var(--accent); border-color: var(--accent-glow); background: var(--accent-soft); }
+
 /* ---------- Hero / avatar strip ---------- */
 .hero {
   display: flex; align-items: center; gap: 20px;

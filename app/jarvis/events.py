@@ -25,6 +25,11 @@ class EventType(StrEnum):
     TOOL_COMPLETED = "tool_completed"
     WORKFLOW_NODE_STARTED = "workflow_node_started"
     WORKFLOW_NODE_COMPLETED = "workflow_node_completed"
+    #: Phase 11: real routing visibility (provider that handled the request).
+    LLM_PROVIDER_SELECTED = "llm_provider_selected"
+    #: Emitted ONLY when a routed provider failed BEFORE the first delta and
+    #: the chain moved on — never after real tokens were streamed.
+    LLM_FALLBACK = "llm_fallback"
     TOKEN = "token"
     ASSISTANT_MESSAGE = "assistant_message"
     LISTENING_STARTED = "listening_started"

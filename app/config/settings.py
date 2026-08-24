@@ -112,6 +112,75 @@ class Settings(BaseSettings):
     #: (non-browser clients) is allowed for tests and tooling.
     jarvis_ws_allow_origins: str = ""
 
+    # --- Phase 10: LLM provider layer (Jarvis assistant surface ONLY) --------
+    #: Provider selection. Unknown/missing config disables the layer.
+    #: Supported: ollama | deepseek | moonshot | gemini | anthropic | openai | openrouter
+    jarvis_llm_provider: str = "ollama"
+    #: Model identifier exactly as the provider expects it. For OpenAI /
+    #: OpenRouter this is THE model setting; vendor-specific defaults below
+    #: apply to their own adapters when this is empty.
+    jarvis_llm_model: str = ""
+    #: Provider base URL override. Empty uses vendor defaults everywhere.
+    jarvis_llm_base_url: str = ""
+    jarvis_llm_timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
+    jarvis_llm_max_tokens: int = Field(default=512, ge=1, le=8192)
+    jarvis_llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+    #: Emit `token` events from genuine provider deltas only.
+    jarvis_llm_streaming: bool = False
+
+    # --- Phase 10B: capability-aware routing (OFF by default) ----------------
+    #: When false, ``create_assistant_llm`` returns the single Phase 10A client.
+    jarvis_llm_routing_enabled: bool = False
+    #: Preferred provider when routing is on and the request has no explicit
+    #: preference. Empty falls back to ``jarvis_llm_provider``.
+    jarvis_llm_routing_default: str = ""
+    #: lowest | balanced | ignore  (config tiers only — no billing)
+    jarvis_llm_cost_preference: str = "balanced"
+    #: lowest | balanced | ignore
+    jarvis_llm_latency_preference: str = "balanced"
+    #: any | local  (local restricts the pool to Ollama)
+    jarvis_llm_privacy_preference: str = "any"
+    #: Comma-separated fallback order, e.g. ``openai,gemini``. Unknown names ignored.
+    jarvis_llm_fallback_providers: str = ""
+    #: Bound for /status health probes (seconds). Routing selection never probes.
+    jarvis_llm_health_timeout_seconds: float = Field(default=3.0, ge=0.5, le=15.0)
+    #: When True, non-loopback Ollama URLs must be HTTPS (ngrok/production).
+    #: Loopback HTTP (127.0.0.1 / localhost) remains allowed for local development.
+    jarvis_ollama_require_https: bool = False
+
+    #: Server-side credentials ONLY (SecretStr never renders in logs/reprs).
+    openai_api_key: SecretStr = SecretStr("")
+    openrouter_api_key: SecretStr = SecretStr("")
+    #: OPTIONAL bearer token protecting a tunnel-exposed Ollama server.
+    ollama_api_key: SecretStr = SecretStr("")
+
+    # --- Additional providers (Phase 10 extension) ---------------------------
+    #: DeepSeek — low-cost cloud provider, OpenAI-compatible wire format.
+    deepseek_api_key: SecretStr = SecretStr("")
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+
+    #: Moonshot Kimi — OpenAI-compatible wire format.
+    moonshot_api_key: SecretStr = SecretStr("")
+    moonshot_base_url: str = "https://api.moonshot.cn/v1"
+    moonshot_model: str = "moonshot-v1-8k"
+
+    #: Google Gemini — native generativelanguage API.
+    gemini_api_key: SecretStr = SecretStr("")
+    gemini_base_url: str = "https://generativelanguage.googleapis.com"
+    gemini_model: str = "gemini-2.0-flash"
+
+    #: Anthropic Claude — native Messages API.
+    anthropic_api_key: SecretStr = SecretStr("")
+    anthropic_base_url: str = "https://api.anthropic.com"
+    anthropic_model: str = "claude-sonnet-4-20250514"
+
+    #: Ollama-specific configuration (aliases of the generic LLM_* vars so
+    #: both naming styles work; generic values win when set).
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = ""
+    ollama_auth_token: SecretStr = SecretStr("")
+
     log_level: str = "INFO"
 
     @field_validator("log_level")
@@ -122,6 +191,29 @@ class Settings(BaseSettings):
         if normalized not in allowed:
             raise ValueError(f"log_level must be one of {sorted(allowed)}")
         return normalized
+
+    @field_validator("jarvis_llm_cost_preference", "jarvis_llm_latency_preference")
+    @classmethod
+    def _normalize_llm_tier_preference(cls, value: str) -> str:
+        normalized = (value or "balanced").strip().lower()
+        allowed = {"lowest", "balanced", "ignore"}
+        if normalized not in allowed:
+            raise ValueError(f"preference must be one of {sorted(allowed)}")
+        return normalized
+
+    @field_validator("jarvis_llm_privacy_preference")
+    @classmethod
+    def _normalize_llm_privacy_preference(cls, value: str) -> str:
+        normalized = (value or "any").strip().lower()
+        allowed = {"any", "local"}
+        if normalized not in allowed:
+            raise ValueError(f"privacy preference must be one of {sorted(allowed)}")
+        return normalized
+
+    @field_validator("jarvis_llm_routing_default", "jarvis_llm_fallback_providers")
+    @classmethod
+    def _strip_routing_strings(cls, value: str) -> str:
+        return (value or "").strip()
 
     @field_validator("greenhouse_base_url", "lever_base_url", "searchapi_search_url")
     @classmethod

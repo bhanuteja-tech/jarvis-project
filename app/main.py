@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes.health import router as health_router
 from app.api.routes.jarvis import router as jarvis_router
+from app.api.routes.llm import router as llm_router
 from app.config.settings import Settings, get_settings
 from app.db.session import create_db_engine
 from app.logging_setup import configure_logging
@@ -50,6 +51,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.include_router(health_router)
     application.include_router(jarvis_router)
+    application.include_router(llm_router)
 
     static_dir = Path(__file__).resolve().parent / "static"
     if static_dir.is_dir():

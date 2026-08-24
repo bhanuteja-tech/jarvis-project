@@ -19,6 +19,7 @@ import {
   setUpload,
   setAvatarState,
   setVoice,
+  setLlm,
 } from "./state.js";
 import { mapEvent, HERO_BY_STATE } from "./events-map.js";
 import { addMessage as renderMessage, showTyping, hideTyping } from "./ui/messages.js";
@@ -193,9 +194,23 @@ function refreshChrome() {
 }
 
 subscribe(() => {
+  syncMessages();
   refreshWorkspace();
   refreshChrome();
 });
+
+// Project store.messages -> DOM exactly once each (user/status/error bubbles
+// included; assistant replies are appended by their own event path).
+let renderedCount = 0;
+function syncMessages() {
+  const { messages } = getState();
+  if (messages.length === renderedCount) return;
+  const fresh = messages.slice(renderedCount);
+  renderedCount = messages.length;
+  for (const msg of fresh) {
+    renderMessage(els.messages, msg.role === "jarvis" ? "jarvis" : msg.role, msg.text);
+  }
+}
 
 // ---- websocket lifecycle ------------------------------------------------------------
 let everConnected = false;
@@ -255,6 +270,323 @@ for (const codeEl of document.querySelectorAll("#help-menu code")) {
     document.getElementById("help-menu")?.removeAttribute("open");
     els.chatInput.value = codeEl.textContent || "";
     els.chatInput.focus();
+  });
+}
+
+// ---- AI engine status card (safe /api/llm/* metadata only) ------------
+const aiEngine = document.getElementById("ai-engine");
+const aiBody = document.getElementById("ai-engine-body");
+const aiTestBtn = document.getElementById("ai-test-btn");
+const aiModelsBtn = document.getElementById("ai-models-btn");
+const aiDrawer = document.getElementById("ai-drawer");
+const aiClose = document.getElementById("ai-close");
+const aiActive = document.getElementById("ai-active");
+const aiRouting = document.getElementById("ai-routing-enabled");
+const aiPreferred = document.getElementById("ai-preferred-select");
+const aiFallbackSel = document.getElementById("ai-fallback-select");
+const aiFallbackAdd = document.getElementById("ai-fallback-add");
+const aiFallbackList = document.getElementById("ai-fallback-list");
+const aiHealthList = document.getElementById("ai-provider-health");
+const aiSaveBtn = document.getElementById("ai-save-prefs");
+const aiTestBtn2 = document.getElementById("ai-test-btn2");
+
+function renderEngineStatus(status) {
+  setLlm({
+    enabled: !!status.enabled,
+    reachable: !!status.reachable,
+    provider: status.provider || "",
+    model: status.model || "",
+    routingEnabled: !!status.routing_enabled,
+    configuredProviders: Array.isArray(status.configured_providers)
+      ? status.configured_providers
+      : [],
+    capabilities: Array.isArray(status.capabilities) ? status.capabilities : [],
+    modelAvailable: !!status.model_available,
+    healthStatus: status.health_status || "",
+    preferredProvider: status.preferred_provider || "",
+    fallbackProviders: Array.isArray(status.fallback_providers)
+      ? status.fallback_providers
+      : [],
+  });
+
+  const connected = !!status.enabled && status.reachable === true;
+  if (aiEngine) {
+    aiEngine.classList.toggle("is-connected", connected);
+    aiEngine.classList.toggle(
+      "is-unreachable",
+      !!status.enabled && !connected
+    );
+  }
+  const modeBadge = status.routing_enabled
+    ? '<span class="mode-badge on">Intelligent Routing</span>'
+    : status.enabled
+      ? '<span class="mode-badge on">Direct</span>'
+      : '<span class="mode-badge">Deterministic</span>';
+  const latency =
+    status.health_status === "reachable" ? "Online" : connected ? "Degraded" : "Offline";
+  aiBody.innerHTML = "";
+  for (const [k, v, isHtml] of [
+    ["Status", connected ? "● ONLINE" : status.enabled ? "● UNAVAILABLE" : "○ LLM unavailable"],
+    ["Provider", status.provider || "—", true],
+    ["Model", status.model || (status.enabled ? "" : "Deterministic assistant mode"), true],
+    ["Mode", modeBadge],
+    ["Health", latency, true],
+  ]) {
+    const row = document.createElement("div");
+    row.className = "ai-row";
+    const key = document.createElement("span");
+    key.className = "k";
+    key.textContent = k;
+    const val = document.createElement("span");
+    val.className = "v";
+    if (isHtml) val.textContent = String(v);
+    else val.innerHTML = v; // our own badge markup only
+    row.append(key, val);
+    aiBody.appendChild(row);
+  }
+}
+
+async function fetchProviders() {
+  try {
+    const response = await fetch("/api/llm/providers");
+    const payload = await response.json();
+    setLlm({ providers: Array.isArray(payload.providers) ? payload.providers : [] });
+    return getState().llm.providers;
+  } catch {
+    return [];
+  }
+}
+
+// ---- AI drawer -----------------------------------------------------------
+let drawerDraftPreferred = "";
+let drawerDraftFallbacks = [];
+
+function openAiDrawer() {
+  const llm = getState().llm;
+  drawerDraftPreferred = llm.preferredProvider;
+  drawerDraftFallbacks = [...llm.fallbackProviders];
+  void fetchProviders().then(() => renderAiDrawer());
+  renderAiDrawer();
+  aiDrawer.hidden = false;
+  requestAnimationFrame(() => aiDrawer.classList.add("is-open"));
+  aiClose.focus();
+}
+
+function closeAiDrawer() {
+  aiDrawer.classList.remove("is-open");
+  setTimeout(() => {
+    aiDrawer.hidden = true;
+  }, 220);
+}
+
+function renderAiDrawer() {
+  const llm = getState().llm;
+
+  // Active block
+  aiActive.innerHTML = "";
+  for (const [k, v] of [
+    ["Provider", llm.activeRequestProvider || llm.provider || "—"],
+    ["Model", llm.activeRequestModel || llm.model || "—"],
+  ]) {
+    const row = document.createElement("div");
+    row.className = "ai-row";
+    const key = document.createElement("span");
+    key.className = "k";
+    key.textContent = k;
+    const val = document.createElement("span");
+    val.className = "v";
+    val.textContent = v;
+    row.append(key, val);
+    aiActive.appendChild(row);
+  }
+  aiRouting.checked = llm.routingEnabled;
+
+  // Preferred select: only CONFIGURED providers (+ auto).
+  aiPreferred.innerHTML = "";
+  const auto = document.createElement("option");
+  auto.value = "";
+  auto.textContent = "Auto (routing decides)";
+  aiPreferred.appendChild(auto);
+  for (const p of llm.providers.filter((entry) => entry.configured)) {
+    const opt = document.createElement("option");
+    opt.value = p.name;
+    opt.textContent = `${p.name} · ${p.model || "default"}`;
+    if (p.name === drawerDraftPreferred) opt.selected = true;
+    aiPreferred.appendChild(opt);
+  }
+
+  // Fallback select excludes preferred + existing chain.
+  aiFallbackSel.innerHTML = '<option value="">Add provider…</option>';
+  for (const p of llm.providers.filter(
+    (entry) =>
+      entry.configured &&
+      entry.name !== drawerDraftPreferred &&
+      !drawerDraftFallbacks.includes(entry.name)
+  )) {
+    const opt = document.createElement("option");
+    opt.value = p.name;
+    opt.textContent = p.name;
+    aiFallbackSel.appendChild(opt);
+  }
+
+  // Fallback chain list with remove buttons.
+  aiFallbackList.innerHTML = "";
+  drawerDraftFallbacks.forEach((name, index) => {
+    const li = document.createElement("li");
+    li.className = "fallback-item";
+    const num = document.createElement("span");
+    num.className = "fallback-num";
+    num.textContent = `${index + 1}.`;
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = name;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "icon-btn";
+    remove.setAttribute("aria-label", `Remove ${name} from fallback chain`);
+    remove.textContent = "✕";
+    remove.addEventListener("click", () => {
+      drawerDraftFallbacks.splice(index, 1);
+      renderAiDrawer();
+    });
+    li.append(num, nameSpan, remove);
+    aiFallbackList.appendChild(li);
+  });
+  if (!drawerDraftFallbacks.length) {
+    const li = document.createElement("li");
+    li.className = "fallback-empty muted";
+    li.textContent = "No manual fallbacks — routing uses its default order.";
+    aiFallbackList.appendChild(li);
+  }
+
+  // Provider health grid.
+  aiHealthList.innerHTML = "";
+  for (const p of llm.providers) {
+    const li = document.createElement("li");
+    li.className = "provider-health-row";
+    const dot = document.createElement("span");
+    dot.className = "conn-dot " + (
+      p.reachable === true ? "is-online" :
+      p.reachable === false ? "is-offline" : ""
+    );
+    dot.style.position = "static";
+    const nameEl = document.createElement("strong");
+    nameEl.textContent = p.name;
+    const state = document.createElement("small");
+    state.className = "muted";
+    state.textContent = !p.configured
+      ? "not configured"
+      : p.name === (llm.activeRequestProvider || llm.provider)
+        ? p.health_status || (p.reachable ? "online" : "unavailable")
+        : "configured";
+    li.append(dot, nameEl, state);
+    if (p.model) {
+      const model = document.createElement("small");
+      model.className = "provider-model";
+      model.textContent = p.model + (p.model_available ? " ● available" : "");
+      li.appendChild(model);
+    }
+    aiHealthList.appendChild(li);
+  }
+  refreshChrome();
+}
+
+aiModelsBtn?.addEventListener("click", openAiDrawer);
+aiClose?.addEventListener("click", closeAiDrawer);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && aiDrawer && !aiDrawer.hidden) closeAiDrawer();
+});
+aiPreferred?.addEventListener("change", () => {
+  drawerDraftPreferred = aiPreferred.value;
+  renderAiDrawer();
+});
+aiFallbackAdd?.addEventListener("click", () => {
+  if (!aiFallbackSel.value) return;
+  drawerDraftFallbacks.push(aiFallbackSel.value);
+  renderAiDrawer();
+});
+aiRouting?.addEventListener("change", () => {
+  setLlm({ routingEnabled: aiRouting.checked });
+});
+
+aiSaveBtn?.addEventListener("click", async () => {
+  aiSaveBtn.disabled = true;
+  setAvatar("thinking");
+  try {
+    const sessionId = getState().session.id || "";
+    const response = await fetch(
+      `/api/llm/preferences?session_id=${encodeURIComponent(sessionId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          routing_enabled: aiRouting.checked,
+          preferred_provider: drawerDraftPreferred,
+          fallback_providers: drawerDraftFallbacks,
+        }),
+      }
+    );
+    if (!response.ok) {
+      const detail = await response.json().catch(() => null);
+      addMessage(
+        "error",
+        detail?.detail?.message || "Preferences were rejected by the server."
+      );
+    } else {
+      const saved = await response.json();
+      setLlm({
+        preferredProvider: saved.preferred_provider,
+        fallbackProviders: saved.fallback_providers,
+        routingEnabled: saved.routing_enabled,
+      });
+      addMessage("status", "AI engine preferences saved for this session.");
+      closeAiDrawer();
+    }
+  } catch {
+    addMessage("error", "Could not save AI engine preferences.");
+  } finally {
+    aiSaveBtn.disabled = false;
+    setAvatar("idle");
+  }
+});
+
+async function refreshEngineStatus() {
+  setAvatar("thinking");
+  try {
+    const response = await fetch("/api/llm/status");
+    renderEngineStatus(await response.json());
+  } catch {
+    renderEngineStatus({ enabled: false, reachable: false });
+  }
+  setAvatar("idle");
+}
+
+aiEngine?.addEventListener("toggle", () => {
+  if (aiEngine.open) void refreshEngineStatus();
+});
+
+// Both Test buttons share one flow: /api/llm/test + status refresh.
+for (const btn of [aiTestBtn, aiTestBtn2]) {
+  btn?.addEventListener("click", async () => {
+    cancelSpeak();
+    stopListening();
+    btn.disabled = true;
+    setAvatar("thinking");
+    try {
+      const response = await fetch("/api/llm/test", { method: "POST" });
+      const payload = await response.json();
+      renderEngineStatus(payload);
+      addMessage(
+        "status",
+        payload.reachable
+          ? `✓ ${payload.provider || "provider"} reachable`
+          : "✕ AI engine unavailable"
+      );
+    } catch {
+      addMessage("error", "Could not reach the AI engine endpoint.");
+    } finally {
+      btn.disabled = false;
+      setAvatar("idle");
+    }
   });
 }
 
@@ -349,7 +681,48 @@ function handleEvent(envelope) {
     return;
   }
 
+  if (mapped.aiSelected) {
+    // Real routing visibility from the backend (never fabricated client-side).
+    setLlm({
+      activeRequestProvider: mapped.aiSelected.provider,
+      activeRequestModel: mapped.aiSelected.model,
+      streaming: false,
+      tokensStreamed: 0,
+    });
+    markNodeStarted("llm_router");
+    markNodeCompleted("llm_router");
+    markNodeStarted(
+      "llm_provider",
+      `Provider: ${mapped.aiSelected.provider || "auto"}` +
+        (mapped.aiSelected.model ? ` · ${mapped.aiSelected.model}` : "")
+    );
+    markNodeCompleted("llm_provider");
+    return;
+  }
+
+  if (mapped.aiFallback) {
+    const { from, to, code } = mapped.aiFallback;
+    addMessage(
+      "status",
+      `${from || "provider"} unavailable — falling back to ${to || "next provider"}`
+    );
+    if (!to) {
+      markRunFinished("error");
+    }
+    return;
+  }
+
   if (mapped.token) {
+    const state = getState();
+    setLlm({
+      streaming: true,
+      tokensStreamed: state.llm.tokensStreamed + 1,
+      ...(mapped.llmProvider
+        ? { activeRequestProvider: mapped.llmProvider }
+        : {}),
+      ...(mapped.llmModel ? { activeRequestModel: mapped.llmModel } : {}),
+    });
+    if (state.llm.tokensStreamed === 0) markNodeStarted("llm_stream");
     appendTokenToLiveBubble(mapped.token);
     return;
   }
@@ -357,6 +730,25 @@ function handleEvent(envelope) {
   if (mapped.assistantMessage) {
     hideTyping(els.messages);
     renderMessage(els.messages, "jarvis", mapped.assistantMessage.text);
+
+    // AI-engine completion row from REAL llm_meta attachment.
+    const llmMeta = (mapped.assistantMessage.attachments || []).find(
+      (a) => a && a.kind === "llm_meta"
+    );
+    if (llmMeta) {
+      markNodeCompleted("llm_stream");
+      const bits = [llmMeta.provider || getState().llm.activeRequestProvider];
+      if (Number.isFinite(llmMeta.tokens)) bits.push(`${llmMeta.tokens} tokens`);
+      if (Number.isFinite(llmMeta.duration_ms)) {
+        bits.push(`${(llmMeta.duration_ms / 1000).toFixed(1)}s`);
+      }
+      for (const fb of llmMeta.fallbacks || []) {
+        addMessage("status", `${fb.from} unavailable → ${fb.to || "fallback"} (${fb.code})`);
+      }
+      markNodeStarted("llm_complete", `Complete — ${bits.filter(Boolean).join(" · ")}`);
+      markNodeCompleted("llm_complete");
+      setLlm({ streaming: false });
+    }
 
     const snapshot = extractResultSnapshot({
       result_snapshot: envelope.data?.result_snapshot,

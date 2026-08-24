@@ -118,3 +118,17 @@ uvicorn app.main:create_app --factory --reload
 - [ ] Match drawer closes on Escape; close button receives focus on open
 - [ ] Help popover closes after choosing an example command
 - [ ] Focus-visible outlines appear on every interactive element
+
+## 17b. AI Engine (Phase 11)
+- [ ] AI ENGINE chip shows ONLINE/UNAVAILABLE/LLM unavailable correctly
+- [ ] Change Model opens drawer; Escape closes; close button focused
+- [ ] Provider health grid lists all 7 providers with configured state
+- [ ] Preferred select offers ONLY configured providers
+- [ ] Fallback chain add/remove works; preferred excluded automatically
+- [ ] Save preferences persists per session; status echoes values
+- [ ] Unknown provider via API -> safe 400 with code unknown_provider
+- [ ] Routing ON: activity shows Router -> Provider rows from real events
+- [ ] Streaming: Generating row appears on first real token only
+- [ ] Fallback: status line 'X unavailable - falling back to Y' on real hop
+- [ ] Complete row shows handler provider, token count, duration
+- [ ] No API key/token string ever visible in UI or network responses
