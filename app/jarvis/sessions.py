@@ -19,6 +19,8 @@ class Session:
     session_id: str
     created_at: str
     messages: list[dict[str, Any]] = field(default_factory=list)
+    #: Bounded dialogue memory used by the conversational agent (Phase 12).
+    history: list[dict[str, Any]] = field(default_factory=list)
     candidate_input: dict[str, Any] | None = None
     last_state: dict[str, Any] | None = None
 

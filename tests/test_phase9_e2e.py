@@ -284,7 +284,7 @@ class TestReplacementAndCancellation:
         orchestrator, session, sent, send = make_orchestrator(lambda: graphs.pop(0))
 
         await orchestrator.handle_message(
-            session, {"type": "chat", "text": "first search"}, send=send
+            session, {"type": "chat", "text": "find first jobs"}, send=send
         )
         await asyncio.sleep(0)  # let the spawned run start
         await asyncio.wait_for(blocking.started.wait(), timeout=2)
@@ -294,7 +294,7 @@ class TestReplacementAndCancellation:
 
         # Second request while run A is parked → A cancelled + replaced.
         await orchestrator.handle_message(
-            session, {"type": "chat", "text": "second search"}, send=send
+            session, {"type": "chat", "text": "find second batch of jobs"}, send=send
         )
         await orchestrator.wait_for_run()
         for _ in range(50):
@@ -324,7 +324,7 @@ class TestReplacementAndCancellation:
         )
 
         await orchestrator.handle_message(
-            session, {"type": "chat", "text": "long search"}, send=send
+            session, {"type": "chat", "text": "find long list of jobs"}, send=send
         )
         await asyncio.sleep(0)
         await asyncio.wait_for(graph_holder["g"].started.wait(), timeout=2)
@@ -344,7 +344,7 @@ class TestReplacementAndCancellation:
         before = session.last_state
 
         await orchestrator.handle_message(
-            session, {"type": "chat", "text": "search that won't finish"}, send=send
+            session, {"type": "chat", "text": "find jobs that never finish"}, send=send
         )
         await asyncio.sleep(0)
         await asyncio.wait_for(graph_holder["g"].started.wait(), timeout=2)

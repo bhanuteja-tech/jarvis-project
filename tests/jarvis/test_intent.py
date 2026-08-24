@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from app.jarvis.intent import parse_intent
 
 
@@ -33,14 +31,20 @@ class TestGrammar:
     def test_help_action(self) -> None:
         assert parse_intent("help").action == "help"
 
-    def test_free_text_defaults_to_discovery_query(self) -> None:
+    def test_free_text_defaults_to_conversation(self) -> None:
+        """Phase 12: ambiguous free text must NOT trigger the career graph."""
         plan = parse_intent("python engineer roles remote")
 
+        assert plan.action == "casual_chat"
+        assert plan.intent == "casual_chat"
+
+    def test_explicit_find_still_discovers(self) -> None:
+        plan = parse_intent("find python engineer roles remote")
+
         assert plan.action == "run_discovery"
-        assert plan.params["user_query"] == "python engineer roles remote"
+        assert plan.intent == "job_search"
+        assert plan.params["user_query"] == "find python engineer roles remote"
 
     def test_never_raises_on_garbage(self) -> None:
-        with pytest.raises(AssertionError):
-            raise AssertionError  # placeholder: parser must not raise
         plan = parse_intent("")
-        assert plan.action in {"run_discovery", "help"}
+        assert plan.action in {"casual_chat", "run_discovery", "help"}

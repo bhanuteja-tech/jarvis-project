@@ -119,6 +119,10 @@ function refreshWorkspace() {
     renderJobCards(els.jobCards, state.artifacts.jobs, state.artifacts.matchResults, {
       onViewMatch: (index, match) => matchDrawer.open(index, match),
       onTailor: (index) => submitUserText(`tailor job ${index + 1}`),
+      onSave: (index, _job, btn) => void saveJobFromCard(index, btn),
+      onAsk: (index) => askAboutJob(index),
+      isSaved: (index) => state.llm.savedIndexes instanceof Set &&
+        state.llm.savedIndexes.has(index),
     });
   } else {
     els.jobCards.innerHTML = "";
@@ -271,6 +275,177 @@ for (const codeEl of document.querySelectorAll("#help-menu code")) {
     els.chatInput.value = codeEl.textContent || "";
     els.chatInput.focus();
   });
+}
+
+// ---- hash router / home overlay ---------------------------------------------
+const homeView = document.getElementById("home-view");
+const ROUTES = ["#/home", "#/chat", "#/resume", "#/jobs", "#/applications", "#/activity"];
+
+function applyRoute() {
+  const route = location.hash || "#/home";
+  const isHome = route === "#/home";
+  if (homeView) homeView.hidden = !isHome;
+  document.querySelector(".topbar")?.classList.toggle("at-home", isHome);
+  document.querySelectorAll(".topnav a[data-route]").forEach((a) => {
+    a.classList.toggle("is-active", a.getAttribute("data-route") === route);
+  });
+  // Map routes onto existing workspace tabs
+  const tabMap = { "#/activity": "activity", "#/jobs": "jobs",
+                   "#/resume": "resume", "#/chat": "activity" };
+  if (!isHome && tabMap[route]) activateTab(tabMap[route]);
+  if (route === "#/applications") {
+    renderSavedJobs();
+    activateTab("applications");
+  }
+}
+window.addEventListener("hashchange", applyRoute);
+
+function go(route) {
+  if (location.hash === route) applyRoute();
+  else location.hash = route;
+}
+
+// ---- toasts -------------------------------------------------------------------
+function toast(message, kind = "") {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+  const el = document.createElement("div");
+  el.className = `toast ${kind}`;
+  el.textContent = message;
+  container.appendChild(el);
+  setTimeout(() => {
+    el.style.opacity = "0";
+    setTimeout(() => el.remove(), 250);
+  }, 3600);
+}
+
+// ---- home screen -----------------------------------------------------------------
+async function loadHomeContext() {
+  try {
+    const sessionId = getState().session.id;
+    const response = await fetch(
+      `/api/home/context?session_id=${encodeURIComponent(sessionId)}`
+    );
+    const data = await response.json();
+    const ul = document.getElementById("home-context");
+    if (!ul) return;
+    ul.innerHTML = "";
+    for (const line of data.context_lines || []) {
+      const li = document.createElement("li");
+      li.textContent = line;
+      ul.appendChild(li);
+    }
+  } catch {
+    /* context is decorative; failures are silent */
+  }
+}
+
+document.querySelectorAll("#quick-actions button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const q = btn.dataset.q || "";
+    if (btn.dataset.route) {
+      go(btn.dataset.route);
+      return;
+    }
+    go("#/chat");
+    els.chatInput.value = q;
+    els.chatForm.dispatchEvent(new Event("submit"));
+  });
+});
+document.getElementById("home-form")?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = document.getElementById("home-input");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  go("#/chat");
+  els.chatInput.value = text;
+  els.chatForm.dispatchEvent(new Event("submit"));
+});
+
+// ---- saved jobs / applications --------------------------------------------------
+async function renderSavedJobs() {
+  const container = document.getElementById("saved-cards");
+  const empty = document.getElementById("applications-empty");
+  if (!container) return;
+  try {
+    const sessionId = getState().session.id;
+    const response = await fetch(
+      `/api/jobs/saved?session_id=${encodeURIComponent(sessionId)}`
+    );
+    const data = await response.json();
+    empty.hidden = !!data.jobs?.length;
+    container.innerHTML = "";
+    for (const job of data.jobs || []) {
+      const card = document.createElement("article");
+      card.className = "job-card";
+      const head = document.createElement("div");
+      head.className = "job-card__head";
+      const titleWrap = document.createElement("div");
+      titleWrap.style.minWidth = "0";
+      const t = document.createElement("div");
+      t.className = "job-card__title";
+      t.textContent = job.title || "Untitled role";
+      const c = document.createElement("div");
+      c.className = "job-card__company";
+      c.textContent = job.company || "";
+      titleWrap.append(t, c);
+      head.appendChild(titleWrap);
+      const status = document.createElement("span");
+      status.className = "mode-badge";
+      status.textContent = job.status || "saved";
+      head.appendChild(status);
+      card.appendChild(head);
+      const meta = document.createElement("div");
+      meta.className = "job-card__meta";
+      meta.textContent = [job.location, job.job_url ? "link ↗" : ""].filter(Boolean).join(" · ");
+      card.appendChild(meta);
+      const actions = document.createElement("div");
+      actions.className = "job-card__actions";
+      if (job.job_url) {
+        const link = document.createElement("a");
+        link.className = "btn";
+        link.href = job.job_url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "Open posting ↗";
+        actions.appendChild(link);
+      }
+      for (const s of ["applied", "interviewing", "archived"]) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "btn";
+        b.textContent = s[0].toUpperCase() + s.slice(1);
+        b.addEventListener("click", async () => {
+          await fetch(
+            `/api/jobs/saved/${encodeURIComponent(job.job_key)}?session_id=${encodeURIComponent(getState().session.id)}`,
+            { method: "PATCH", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: s }) }
+          );
+          toast(`Marked ${s}`, "ok");
+          void renderSavedJobs();
+        });
+        actions.appendChild(b);
+      }
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "btn btn--danger";
+      removeBtn.textContent = "Remove";
+      removeBtn.addEventListener("click", async () => {
+        await fetch(
+          `/api/jobs/saved/${encodeURIComponent(job.job_key)}?session_id=${encodeURIComponent(getState().session.id)}`,
+          { method: "DELETE" }
+        );
+        toast("Removed from saved", "");
+        void renderSavedJobs();
+      });
+      actions.appendChild(removeBtn);
+      card.appendChild(actions);
+      container.appendChild(card);
+    }
+  } catch {
+    /* silent */
+  }
 }
 
 // ---- AI engine status card (safe /api/llm/* metadata only) ------------
@@ -678,6 +853,8 @@ function handleEvent(envelope) {
       `Resume analyzed — ${mapped.resumeParsed.skills_found ?? 0} skills, ` +
         `${mapped.resumeParsed.experience_items ?? 0} experience entries detected.`
     );
+    // Phase 12: switch to Resume workspace after successful upload
+    activateTab("resume");
     return;
   }
 
@@ -730,6 +907,32 @@ function handleEvent(envelope) {
   if (mapped.assistantMessage) {
     hideTyping(els.messages);
     renderMessage(els.messages, "jarvis", mapped.assistantMessage.text);
+
+    // Phase 12: cover-letter attachment -> download button
+    const clAttachment = (mapped.assistantMessage.attachments || []).find(
+      (a) => a && a.kind === "cover_letter"
+    );
+    if (clAttachment && typeof clAttachment.text === "string") {
+      const row = document.createElement("div");
+      row.className = "action-row";
+      const dl = document.createElement("button");
+      dl.type = "button";
+      dl.className = "btn btn--primary";
+      dl.textContent = "Download cover letter";
+      dl.addEventListener("click", () => {
+        const blob = new Blob([clAttachment.text], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = "cover-letter.txt";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+      });
+      row.appendChild(dl);
+      els.messages.lastElementChild.appendChild(row);
+    }
 
     // AI-engine completion row from REAL llm_meta attachment.
     const llmMeta = (mapped.assistantMessage.attachments || []).find(
@@ -798,12 +1001,21 @@ function handleEvent(envelope) {
       "max_chars_violation",
     ].includes(mapped.errorCode);
     if (!isUploadError) markRunFinished("error");
-    addMessage("error", mapped.errorText);
+    const friendly = FRIENDLY_ERRORS[mapped.errorCode] || mapped.errorText;
+    addMessage("error", friendly);
     setAvatar(isUploadError ? "idle" : "error");
     if (isUploadError) {
       uploader.markError(mapped.errorCode);
+      return;
     }
-    return;
+    // Actionable recovery buttons on the error bubble
+    const lastUser = [...getState().messages].reverse().find((m) => m.role === "user");
+    const actions = [];
+    if (lastUser) {
+      actions.push({ label: "Retry", onClick: () => submitUserText(lastUser.text) });
+    }
+    actions.push({ label: "Change model", onClick: () => openAiDrawer() });
+    attachActionsToLast(actions);
   }
 
   // Non-run errors (e.g. upload failures) still restore the avatar.
@@ -812,7 +1024,80 @@ function handleEvent(envelope) {
   }
 }
 
+// Friendly error-code mapping — never raw provider/stack text.
+const FRIENDLY_ERRORS = {
+  provider_unavailable: "I couldn't reach the AI provider. It may be offline.",
+  timeout: "The AI request timed out. Try again or switch models.",
+  authentication_failed: "Authentication failed. Check the provider API key (server-side).",
+  rate_limited: "Rate limited by the provider. Wait a moment and retry.",
+  invalid_model: "That model isn't available on the provider.",
+  invalid_response: "The AI returned something unreadable. Try again.",
+  run_failed: "Something went wrong starting this request. Please retry.",
+  workflow_failed: "The workflow hit an error. Your previous results are safe.",
+};
+
 // Grounded quick actions attached to the latest assistant result message.
+// ---- Phase 12: save job + ask-about-job --------------------------------------
+const savedIndexSets = new Set();
+
+function savedSetForSession(sessionId) {
+  if (!savedIndexSets.has(sessionId)) savedIndexSets.set(sessionId, new Set());
+  return savedIndexSets.get(sessionId);
+}
+
+function askAboutJob(index) {
+  go("#/chat");
+  cancelSpeak();
+  stopListening();
+  addMessage("user", `Tell me about job ${index + 1} — why does it match me?`);
+  send("job_question", {
+    job_index: index,
+    question: `Why am I a good fit for this job? What are the gaps?`,
+  });
+}
+
+function attachActionsToLast(actions) {
+  const last = els.messages.lastElementChild;
+  if (!last || !actions.length) return;
+  const row = document.createElement("div");
+  row.className = "action-row";
+  for (const action of actions.slice(0, 4)) {
+    const chipEl = document.createElement("button");
+    chipEl.type = "button";
+    chipEl.className = "action-chip";
+    chipEl.textContent = action.label;
+    chipEl.addEventListener("click", action.onClick);
+    row.appendChild(chipEl);
+  }
+  last.appendChild(row);
+}
+
+async function saveJobFromCard(index, btn) {
+  const sessionId = getState().session.id;
+  try {
+    const response = await fetch(
+      `/api/jobs/saved?session_id=${encodeURIComponent(sessionId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_index: index }),
+      }
+    );
+    const data = await response.json();
+    if (data.saved) {
+      toast("★ Job saved", "ok");
+      if (btn) {
+        btn.textContent = "★ Saved";
+        btn.disabled = true;
+      }
+    } else {
+      toast(data.reason === "job_not_found" ? "Job not found in this run." : "Already saved.", "");
+    }
+  } catch {
+    toast("Could not save the job right now.", "error");
+  }
+}
+
 function attachResultActions(snapshot) {
   const actions = [];
   if (snapshot.jobs?.length) {
@@ -865,3 +1150,7 @@ function appendTokenToLiveBubble(token) {
   liveBubble.textContent = liveText;
   els.messages.scrollTop = els.messages.scrollHeight;
 }
+// ---- boot: route + home -------------------------------------------------------
+applyRoute();
+void loadHomeContext();
+requestAnimationFrame(() => applyRoute());

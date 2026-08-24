@@ -25,6 +25,14 @@
     </div>
 
     <div class="topbar-status">
+      <nav class="topnav" aria-label="Workspace sections">
+        <a href="#/home" data-route="#/home">Home</a>
+        <a href="#/chat" data-route="#/chat" class="is-active">Chat</a>
+        <a href="#/resume" data-route="#/resume">Resume</a>
+        <a href="#/jobs" data-route="#/jobs">Jobs</a>
+        <a href="#/applications" data-route="#/applications">Applications</a>
+        <a href="#/activity" data-route="#/activity">Activity</a>
+      </nav>
       <span id="system-state" class="pill pill-idle" role="status">IDLE</span>
       <span class="conn" id="conn-pill">
         <span class="conn-dot" id="conn-dot" aria-hidden="true"></span>
@@ -87,6 +95,31 @@
     <p class="voice-transcript" id="voice-transcript" aria-live="polite" hidden></p>
   </section>
 
+  <!-- ================= HOME OVERLAY ================= -->
+  <section id="home-view" class="home-view" hidden>
+    <div class="home-hero">
+      <div id="home-orb" class="avatar-stage home-orb"></div>
+      <h2 class="home-title">JARVIS</h2>
+      <p class="home-sub muted" id="home-greeting">Ask me anything.</p>
+
+      <form id="home-form" class="home-input-row" autocomplete="off">
+        <input id="home-input" type="text"
+               placeholder="Ask JARVIS anything…" aria-label="Message JARVIS" />
+        <button type="submit" class="send-btn">Send</button>
+      </form>
+
+      <div class="quick-actions" id="quick-actions">
+        <button type="button" data-q="Analyze my resume">📄 Analyze Resume</button>
+        <button type="button" data-q="Find ML internships in Bangalore">🔍 Find Jobs</button>
+        <button type="button" data-q="How should I prepare for an ML interview?">🧭 Career Advice</button>
+        <button type="button" data-q="Improve my resume for a senior role">✨ Improve Resume</button>
+        <button type="button" data-q="Prepare me for a data science interview">🎯 Prepare Interview</button>
+        <button type="button" data-route="#/jobs">⭐ Explore Matches</button>
+      </div>
+      <ul id="home-context" class="home-context" aria-live="polite"></ul>
+    </div>
+  </section>
+
   <!-- ================= MAIN GRID ================= -->
   <main class="workspace">
 
@@ -118,6 +151,7 @@
         <button class="tab" role="tab" aria-selected="false" data-tab="jobs" id="tabbtn-jobs">Jobs</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="resume" id="tabbtn-resume">Resume</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="validation" id="tabbtn-validation">Validation</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="applications" id="tabbtn-applications">Applications</button>
       </nav>
 
       <div class="tab-panel is-active" id="tab-activity" role="tabpanel" aria-labelledby="tabbtn-activity">
@@ -151,7 +185,16 @@
       <div class="tab-panel" id="tab-validation" role="tabpanel" aria-labelledby="tabbtn-validation" hidden>
         <div id="validation-view" class="validation-view"></div>
       </div>
+      <div class="tab-panel" id="tab-applications" role="tabpanel" aria-labelledby="tabbtn-applications" hidden>
+        <div class="empty-state muted" id="applications-empty">
+          Saved jobs will appear here. Use ☆ on any job card to save it.
+        </div>
+        <div class="job-cards" id="saved-cards"></div>
+      </div>
     </section>
+
+  <!-- Toast notifications -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
   </main>
 
   <!-- Match explanation drawer -->

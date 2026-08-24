@@ -27,7 +27,13 @@ from typing import Any
 from app.candidate.analyzer import ResumeAnalyzer
 from app.config.settings import Settings
 from app.jarvis import events as ev
-from app.jarvis.intent import parse_intent
+from app.jarvis.conversation import (
+    SYSTEM_PERSONAS,
+    _deterministic_job_answer,
+    deterministic_reply,
+)
+from app.jarvis.intent import NON_WORKFLOW_ACTIONS, Plan, parse_intent
+from app.jarvis.memory import remember_turn
 from app.jarvis.narrator import narrate
 from app.jarvis.sessions import InMemorySessionStore, Session
 
@@ -321,6 +327,284 @@ class JarvisOrchestrator:
         return await _finalize(deterministic_reply)
 
     # ------------------------------------------------------------------
+    async def _handle_conversational_intent(
+        self,
+        session: Session,
+        plan: Plan,
+        emitter: EventEmitter,
+        run_id: str,
+        raw_text: str,
+    ) -> None:
+        """Phase 12: casual chat / general Q&A / career advice / job details /
+        cover letter / resume analysis — everything that must NOT run the
+        career discovery graph."""
+        from app.jarvis import conversation
+        from app.jarvis.cover_letter import (
+            build_cover_letter_facts,
+            deterministic_letter,
+            generate_cover_letter,
+        )
+        from app.jarvis.job_facts import (
+            extract_candidate_facts,
+            extract_job_facts,
+            selected_job_index,
+        )
+        from app.llm.router import bind_assistant_task
+
+        intent = plan.intent or plan.action
+        text = str(plan.params.get("user_query") or plan.params.get("question") or raw_text)
+
+        await emitter.emit(
+            ev.EventType.AGENT_THINKING,
+            run_id=run_id,
+            detail=f"intent={intent}",
+        )
+
+        llm = None
+        if self._llm is not None and getattr(self._llm, "enabled", False):
+            llm = bind_assistant_task(self._llm, "chat")
+
+        # ---- resume analysis (deterministic; analyzer runs locally) -------
+        if intent == "resume_analysis":
+            return await self._handle_resume_analysis(session, emitter, run_id, llm)
+
+        # ---- cover letter --------------------------------------------------
+        if intent == "cover_letter":
+            state = session.last_state
+            index = selected_job_index(
+                state, explicit=plan.params.get("job_index")
+                if isinstance(plan.params.get("job_index"), int) else None
+            )
+            facts = build_cover_letter_facts(state, index)
+            if not isinstance(facts.get("job_facts"), dict):
+                await self._speak(
+                    emitter, run_id,
+                    "I don't have a job in this session yet — search first "
+                    "(e.g. 'find ML internships in Bangalore'), then I'll "
+                    "draft a tailored cover letter."
+                )
+                await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
+                return
+            letter = await generate_cover_letter(llm, facts)
+            source = "llm" if letter else "template"
+            if not letter:
+                letter = deterministic_letter(facts)
+            await self._speak(
+                emitter, run_id, "Here's your draft cover letter:",
+                attachments=[{"kind": "cover_letter", "text": letter,
+                              "source": source}],
+            )
+            await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
+            return
+
+        # ---- job details / why am I a fit -----------------------------------
+        if intent == "job_details":
+            state = session.last_state or {}
+            index = selected_job_index(
+                state,
+                explicit=(
+                    plan.params["job_index"]
+                    if isinstance(plan.params.get("job_index"), int)
+                    else None
+                ),
+            )
+            facts = extract_job_facts(state, index)
+            if not facts:
+                await self._speak(
+                    emitter, run_id,
+                    "No jobs in this session yet. Ask me to find roles first "
+                    "(e.g. 'find data science jobs').",
+                )
+                await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
+                return
+            cand = extract_candidate_facts(state)
+            system_prompt = (
+                "You are JARVIS answering a question about ONE specific job. "
+                "You receive job_facts and candidate_facts — VERIFIED DATA "
+                "ONLY. Ground every claim in those facts; never invent "
+                "requirements, companies, or experience. If information is "
+                "missing, say so briefly. Max 5 sentences."
+            )
+            user_prompt = json.dumps({
+                "question": text,
+                "job_facts": facts,
+                "candidate_facts": cand,
+            }, ensure_ascii=False)
+            fallback = _deterministic_job_answer(facts, cand, text)
+            reply, meta = await self._grounded_answer(
+                emitter, run_id, llm, system_prompt, user_prompt, fallback
+            )
+            await self._speak(emitter, run_id, reply, attachments=[meta])
+            await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
+            return
+
+        # ---- casual chat / general question / career advice -----------------
+        remember_turn(session.history, "user", text)
+        result: Any = None
+        if llm is not None:
+            persona = SYSTEM_PERSONAS.get(intent, conversation.SYSTEM_PROMPT)
+
+            async def _emit_token(delta: str) -> None:
+                await emitter.emit(
+                    ev.EventType.TOKEN,
+                    run_id=run_id,
+                    text=delta,
+                    provider=str(
+                        getattr(llm, "provider_name", "")
+                        or self._settings.jarvis_llm_provider
+                    ),
+                    model=(
+                        getattr(llm, "model_name", "")
+                        or self._settings.jarvis_llm_model
+                    ),
+                )
+
+            on_delta = (
+                _emit_token if self._settings.jarvis_llm_streaming else None
+            )
+
+            result = await conversation.converse(
+                llm,
+                history=session.history,
+                user_text=text,
+                system_override=persona,
+                on_delta=on_delta,
+            )
+
+        if result is not None:
+            reply = result.text
+            attachments: list[dict[str, Any]] = [{
+                "kind": "llm_meta",
+                "provider": getattr(llm, "provider_name", "")
+                or self._settings.jarvis_llm_provider,
+                "model": getattr(llm, "model_name", "")
+                or self._settings.jarvis_llm_model,
+                "duration_ms": result.duration_ms,
+                "tokens": result.tokens if result.streamed else None,
+            }]
+        else:
+            guidance = deterministic_reply(intent, text)
+            reply = guidance or (
+                "I couldn't reach an AI model for that. Deterministic mode "
+                "is still fully available — try 'help', upload a resume, or "
+                "'find <role> in <city>'."
+            )
+            attachments = []
+
+        await self._speak(emitter, run_id, reply, attachments=attachments)
+        await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
+
+    async def _handle_resume_analysis(
+        self,
+        session: Session,
+        emitter: EventEmitter,
+        run_id: str,
+        llm: Any,
+    ) -> None:
+        """Analyze the stored resume WITHOUT running the discovery graph."""
+        if not session.candidate_input:
+            await self._speak(
+                emitter, run_id,
+                "No resume uploaded yet in this session — drop a PDF/DOCX/"
+                "TXT/MD file and I'll analyze it.",
+            )
+            await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
+            return
+
+        await emitter.emit(
+            ev.EventType.TOOL_STARTED, tool="resume_analysis",
+            label="Analyzing resume",
+        )
+        analyzer = ResumeAnalyzer(self._settings)
+        result = await analyzer.build_profile(dict(session.candidate_input))
+        profile_dump = result.profile.model_dump() if result.profile else {}
+
+        skills = [
+            s.get("name") for s in profile_dump.get("skills", {}).get("items", [])
+            if isinstance(s, dict)
+        ]
+        exp_items = profile_dump.get("experience", {}).get("items", [])
+        edu_items = profile_dump.get("education", {}).get("items", [])
+        cert_count = len(profile_dump.get("certifications", {}).get("items", []))
+        years = profile_dump.get("experience", {}).get("total_years")
+
+        summary_lines = [
+            "Resume analysis complete:",
+            f"• {len(skills)} skills: {', '.join(str(s) for s in skills[:8])}"
+            + ("…" if len(skills) > 8 else ""),
+            f"• {len(exp_items)} experience entries"
+            + (f" (~{years:g} yrs total)" if isinstance(years, (int, float)) else ""),
+            f"• {len(edu_items)} education, {cert_count} certifications",
+        ]
+        if result.status is not None and hasattr(result.status, "value"):
+            summary_lines.append(f"Status: {result.status.value}")
+
+        # Cache into last_state so job matching / workspaces can reuse.
+        state = dict(session.last_state or {})
+        state["candidate_profile"] = {
+            "status": result.status.value if hasattr(result.status, "value")
+            else str(result.status),
+            "profile": profile_dump,
+        }
+        session.last_state = state
+
+        await emitter.emit(
+            ev.EventType.TOOL_COMPLETED,
+            tool="resume_analysis",
+            skills_found=len(skills),
+            experience_items=len(exp_items),
+        )
+        await self._speak(emitter, run_id, "\n".join(summary_lines))
+        await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
+
+    async def _grounded_answer(
+        self,
+        emitter: EventEmitter,
+        run_id: str,
+        llm: Any,
+        system_prompt: str,
+        user_prompt: str,
+        fallback_text: str,
+    ) -> tuple[str, dict[str, Any]]:
+        """Grounded Q&A: LLM answer with deterministic fallback + meta."""
+        meta: dict[str, Any] = {"kind": "llm_meta"}
+        if llm is None or not getattr(llm, "enabled", False):
+            return fallback_text, meta
+        try:
+            if self._settings.jarvis_llm_streaming and hasattr(llm, "stream"):
+                collected: list[str] = []
+                async for delta in llm.stream(
+                    system_prompt=system_prompt, user_prompt=user_prompt
+                ):
+                    collected.append(delta)
+                    await emitter.emit(ev.EventType.TOKEN, run_id=run_id,
+                                       text=delta)
+                streamed = "".join(collected).strip()
+                if streamed:
+                    from app.llm.intent_json import parse_intent_json
+
+                    parsed = parse_intent_json(streamed)
+                    inner = parsed.get("answer") if isinstance(parsed, dict) else None
+                    meta["tokens"] = len(collected)
+                    return (inner.strip() if isinstance(inner, str) and inner.strip()
+                            else streamed), meta
+            else:
+                raw = await llm.generate(
+                    system_prompt=system_prompt, user_prompt=user_prompt,
+                    json_mode=True,
+                )
+                from app.llm.intent_json import parse_intent_json
+
+                payload = parse_intent_json(raw)
+                answer = payload.get("answer") if isinstance(payload, dict) else None
+                if isinstance(answer, str) and answer.strip():
+                    return answer.strip(), meta
+        except Exception:  # noqa: BLE001 - grounding fallback contract
+            logger.warning("grounded answer fell back to deterministic",
+                           exc_info=True)
+        return fallback_text, meta
+
+    # ------------------------------------------------------------------
     async def handle_message(
         self,
         session: Session,
@@ -337,6 +621,39 @@ class JarvisOrchestrator:
 
         if message_type == "resume_upload":
             await self._handle_resume_upload(session, message, emitter)
+            return
+
+        if message_type == "job_question":
+            # Ask-JARVIS-about-this-job: grounded Q&A over session state.
+            index = message.get("job_index")
+            question = str(message.get("question") or "").strip()
+            plan = Plan(
+                action="job_details",
+                intent="job_details",
+                params={
+                    "question": question or "Tell me about this job.",
+                    **(
+                        {"job_index": index}
+                        if isinstance(index, int)
+                        else {}
+                    ),
+                },
+                from_free_text=False,
+            )
+            run_id = (
+                f"run_{session.session_id[:8]}_{self._run_counter:04d}_"
+                f"{time.time_ns()}"
+            )
+            await emitter.emit(
+                ev.EventType.AGENT_STARTED,
+                run_id=run_id,
+                action="job_details",
+                params=_safe_params(plan.params),
+            )
+            await self._handle_conversational_intent(
+                session, plan, emitter, run_id,
+                str(plan.params.get("question")),
+            )
             return
 
         if message_type == "chat":
@@ -389,6 +706,17 @@ class JarvisOrchestrator:
 
                 await self._speak(emitter, run_id, GRAMMAR_HELP)
                 await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
+                return
+
+            # ---- Phase 12: non-workflow capabilities ------------------------
+            effective_intent = plan.intent or plan.action
+            if effective_intent in NON_WORKFLOW_ACTIONS and plan.action not in {
+                "help",
+                "get_results",
+            }:
+                await self._handle_conversational_intent(
+                    session, plan, emitter, run_id, text
+                )
                 return
 
             if plan.action == "get_results":
@@ -531,13 +859,28 @@ class JarvisOrchestrator:
             return
 
         session.candidate_input = {"text": content}
+        session.last_state = dict(session.last_state or {})
+        session.last_state["candidate_input"] = {"text": content}
+
+        # Phase 12: persist the parsed candidate profile into last_state so
+        # the resume workspace, job matcher, and home context all see it.
+        profile_dump = result.profile.model_dump() if result.profile else {}
+        status_value = (
+            result.status.value if hasattr(result.status, "value") else str(result.status)
+        )
+        session.last_state["candidate_profile"] = {
+            "status": status_value,
+            "profile": profile_dump,
+        }
+
         skills = {skill.name for skill in (result.profile.skills.items if result.profile else [])}
+        exp_count = len(result.profile.experience.items) if result.profile else 0
         await emitter.emit(
             ev.EventType.TOOL_COMPLETED,
             tool="set_resume",
             status=result.status.value if hasattr(result.status, "value") else result.status,
             skills_found=len(skills),
-            experience_items=len(result.profile.experience.items) if result.profile else 0,
+            experience_items=exp_count,
         )
         await self._speak(
             emitter,

@@ -89,6 +89,154 @@ async def llm_test(request: Request) -> dict[str, Any]:
     return payload
 
 
+# ---------------------------------------------------------------------------
+# Phase 12: saved jobs / home context / traces
+# ---------------------------------------------------------------------------
+
+from app.jarvis.observability import trace_recorder  # noqa: E402
+from app.jarvis.saved import saved_job_store  # noqa: E402
+from app.jarvis.sessions import InMemorySessionStore  # noqa: E402
+
+_session_store = InMemorySessionStore()
+
+
+def _session(request: Request):
+    session_id = request.query_params.get("session_id") or ""
+    return session_id, _session_store.get_or_create(session_id) if session_id else None
+
+
+def _snapshot_from_state(state: dict[str, Any] | None, index: int) -> dict[str, Any] | None:
+    if not isinstance(state, dict):
+        return None
+    jobs = state.get("jobs") or []
+    if not isinstance(index, int) or not (0 <= index < len(jobs)):
+        return None
+    job = jobs[index]
+    match = next(
+        (
+            m
+            for m in state.get("match_results") or []
+            if isinstance(m, dict) and m.get("job_index") == index
+        ),
+        None,
+    )
+    snapshot = {**job}
+    if isinstance(match, dict):
+        snapshot["score"] = match.get("score")
+        snapshot["tier"] = match.get("tier")
+    return snapshot
+
+
+@router.post("/api/jobs/saved")
+async def save_job(request: Request) -> dict[str, Any]:
+    session_id, session = _session(request)
+    if not session_id or session is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail={"code": "missing_session",
+                                                     "message": "unknown session"})
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    index = body.get("job_index") if isinstance(body, dict) else None
+
+    # Prefer the session's most recent artifacts (fresh snapshot), else the
+    # session's last workflow state.
+    from app.api.routes.jarvis import _artifact_store, _run_store
+
+    artifacts = None
+    for rid in reversed(list(_run_store()._data.keys())):  # noqa: SLF001
+        rec = _run_store().get(rid)
+        if not rec or rec.get("session_id") != session_id:
+            continue
+        candidate = _artifact_store().get(rid)
+        if candidate and candidate.get("jobs"):
+            artifacts = candidate
+            break
+
+    snapshot = _snapshot_from_state(artifacts or session.last_state, index)
+    if snapshot is None:
+        return {"saved": False, "reason": "job_not_found"}
+    entry = saved_job_store.add(session_id, snapshot)
+    return {"saved": entry is not None, "job": entry}
+
+
+    if not session_id or session is None:
+        return {"jobs": [], "attention": 0}
+    jobs = saved_job_store.list(session_id)
+    attention = sum(1 for j in jobs if j.get("status") == "saved")
+    return {"jobs": jobs, "attention": attention}
+
+
+@router.delete("/api/jobs/saved/{job_key}")
+async def remove_saved(job_key: str, request: Request) -> dict[str, Any]:
+    sid, _sess = _session(request)
+    removed = saved_job_store.remove(sid or "", job_key)
+    return {"removed": removed}
+
+
+@router.patch("/api/jobs/saved/{job_key}")
+async def update_saved_status(job_key: str, request: Request) -> dict[str, Any]:
+    sid, _sess = _session(request)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    status = str(body.get("status", ""))
+    ok = saved_job_store.set_status(sid or "", job_key, status)
+    return {"updated": ok}
+
+
+@router.get("/api/home/context")
+async def home_context(request: Request) -> dict[str, Any]:
+    """Safe greeting facts for the JARVIS home screen."""
+    session_id, session = _session(request)
+    hour = __import__("datetime").datetime.now(__import__("datetime").UTC).hour
+    if hour < 12:
+        part = "morning"
+    elif hour < 18:
+        part = "afternoon"
+    else:
+        part = "evening"
+
+    state = session.last_state if session else None
+    has_resume = bool(state and state.get("candidate_input")) or (
+        session is not None and session.candidate_input is not None
+    )
+    matches = [
+        m for m in (state or {}).get("match_results") or [] if isinstance(m, dict)
+    ]
+    strong = [m for m in matches if m.get("tier") == "strong"]
+    saved = saved_job_store.list(session_id or "")
+    attention = sum(1 for j in saved if j.get("status") == "saved")
+
+    lines: list[str] = []
+    if has_resume:
+        lines.append(f"Good {part}. Your resume is ready.")
+    if strong:
+        lines.append(f"{len(strong)} strong matches found.")
+    if attention:
+        lines.append(f"{attention} application(s) need attention.")
+
+    return {
+        "greeting": f"Good {part}",
+        "has_resume": has_resume,
+        "strong_matches": len(strong),
+        "jobs_found": len((state or {}).get("jobs") or []),
+        "saved_count": len(saved),
+        "attention": attention,
+        "context_lines": lines,
+    }
+
+
+@router.get("/api/traces")
+async def recent_traces(limit: int = 50) -> dict[str, Any]:
+    limit = max(1, min(limit, 200))
+    return {"traces": trace_recorder.recent(limit),
+            "counters": trace_recorder.counters()}
+
+
 @router.get("/api/llm/providers")
 async def llm_providers(request: Request) -> dict[str, Any]:
     """Catalog for the AI-engine UI: every known provider with SAFE state.

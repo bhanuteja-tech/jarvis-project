@@ -26,7 +26,11 @@ export function renderJobCards(container, jobs, matchResults, handlers = {}) {
   const fragment = document.createDocumentFragment();
   list.forEach((job, index) => {
     const match = byIndex.get(index) || null;
-    fragment.appendChild(jobCard(job, index, match, handlers));
+    const card = jobCard(job, index, match, handlers);
+    if (handlers.isSaved?.(job.__index ?? index)) {
+      card.classList.add("is-saved");
+    }
+    fragment.appendChild(card);
   });
   container.appendChild(fragment);
   animateEntrance(container);
@@ -41,7 +45,7 @@ function animateEntrance(container) {
   const cards = container.querySelectorAll(".job-card:not(.is-in)");
   cards.forEach((card, i) => {
     if (i >= 12) {
-      card.classList.add("is-in"); // no animation beyond the first dozen
+      card.classList.add("is-in");
       return;
     }
     card.style.animationDelay = `${Math.min(i * 45, 400)}ms`;
@@ -130,6 +134,26 @@ function jobCard(job, index, match, handlers) {
   tailorBtn.textContent = "Tailor Resume";
   tailorBtn.addEventListener("click", () => handlers.onTailor?.(index));
   actions.appendChild(tailorBtn);
+
+  // Phase 12: save + ask actions
+  if (handlers.onSave) {
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "btn save-btn";
+    saveBtn.textContent = handlers.isSaved?.(index) ? "★ Saved" : "☆ Save";
+    saveBtn.disabled = !!handlers.isSaved?.(index);
+    saveBtn.addEventListener("click", () => handlers.onSave?.(index, job, saveBtn));
+    actions.appendChild(saveBtn);
+  }
+  if (handlers.onAsk) {
+    const askBtn = document.createElement("button");
+    askBtn.type = "button";
+    askBtn.className = "btn";
+    askBtn.textContent = "Ask JARVIS";
+    askBtn.title = "Ask about this job";
+    askBtn.addEventListener("click", () => handlers.onAsk?.(index));
+    actions.appendChild(askBtn);
+  }
 
   if (nonEmpty(job?.job_url)) {
     const link = document.createElement("a");
