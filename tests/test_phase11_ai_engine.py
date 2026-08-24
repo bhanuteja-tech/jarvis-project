@@ -219,6 +219,8 @@ class TestRoutingVisibilityEvents:
             jarvis_assistant_llm_enabled=True,
             jarvis_llm_routing_enabled=True,
             jarvis_llm_provider=provider,
+            # generate-path tests: ambient .env must not flip these to stream.
+            jarvis_llm_streaming=False,
             candidate_redact_pii=True,
         )
         store = InMemorySessionStore()

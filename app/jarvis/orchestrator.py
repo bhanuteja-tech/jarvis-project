@@ -90,7 +90,9 @@ class JarvisOrchestrator:
             # Factory returns a Disabled client when the master flag is off,
             # so this stays inert in deterministic mode.
             self._llm = create_assistant_llm(settings)
-        self._graph_factory = graph_factory or self._default_graph_factory
+        # NOTE: _default_graph_factory is a staticmethod FACTORY that must be
+        # CALLED to produce the zero-arg callable _run_discovery expects.
+        self._graph_factory = graph_factory or self._default_graph_factory(settings)
         self._current_task: asyncio.Task | None = None
         self._run_counter = 0
         self._semaphore = asyncio.Semaphore(
@@ -272,7 +274,23 @@ class JarvisOrchestrator:
                     )
                 streamed = "".join(collected).strip()
                 if streamed:
-                    text, atts = await _finalize(streamed)
+                    # Narration contract is JSON {"text": ...}; extract the
+                    # payload for the authoritative message (tokens already
+                    # shown live were genuine provider deltas either way).
+                    from app.llm.intent_json import parse_intent_json
+
+                    parsed = parse_intent_json(streamed)
+                    inner = (
+                        parsed.get("text")
+                        if isinstance(parsed, dict)
+                        else None
+                    )
+                    final_text = (
+                        inner.strip()
+                        if isinstance(inner, str) and inner.strip()
+                        else streamed
+                    )
+                    text, atts = await _finalize(final_text)
                     atts = [dict(a) for a in atts]
                     for att in atts:
                         if isinstance(att, Mapping) and att.get("kind") == "llm_meta":
@@ -394,6 +412,7 @@ class JarvisOrchestrator:
                     detail="re-running pipeline with explicit target",
                 )
                 self._spawn_run(
+                    emitter,
                     run_id,
                     lambda: self._run_discovery(
                         session,
@@ -413,6 +432,7 @@ class JarvisOrchestrator:
                     detail="planning job discovery",
                 )
                 self._spawn_run(
+                    emitter,
                     run_id,
                     lambda: self._run_discovery(
                         session,
@@ -537,8 +557,15 @@ class JarvisOrchestrator:
         pref_overrides: Mapping[str, Any],
         select_hint: str | None,
     ) -> None:
-        if self._current_task is not None and not self._current_task.done():
-            self._current_task.cancel()
+        # Pre-emptive cancel of any PREVIOUS run. Must never target THIS run:
+        # _spawn_run already registered us as _current_task before we started.
+        previous = self._current_task
+        if (
+            previous is not None
+            and previous is not asyncio.current_task()
+            and not previous.done()
+        ):
+            previous.cancel()
 
         state: dict[str, Any] = {
             "user_query": user_params.get("user_query"),
@@ -651,13 +678,18 @@ class JarvisOrchestrator:
         await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
 
     # ------------------------------------------------------------------
-    def _spawn_run(self, run_id: str, factory: Callable[[], Any]) -> None:
+    def _spawn_run(
+        self,
+        emitter: EventEmitter,
+        run_id: str,
+        factory: Callable[[], Any],
+    ) -> None:
         """Execute a run as a tracked background task.
 
         Runs no longer block the connection loop: the next client message can
         arrive while a run streams, which is what makes replacement and
         explicit cancellation real rather than nominal. Any escape from the
-        guarded coroutine becomes a typed ERROR event.
+        guarded coroutine becomes a typed ERROR event — never silence.
         """
 
         async def _guarded() -> None:
@@ -665,11 +697,21 @@ class JarvisOrchestrator:
                 await factory()
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 - last-resort typed failure
+            except Exception as exc:  # noqa: BLE001 - last-resort typed failure
                 logger.exception(
                     "run crashed outside workflow streaming",
                     extra={"source": "orchestrator", "operation": "run"},
                 )
+                await emitter.emit(
+                    ev.EventType.ERROR,
+                    run_id=run_id,
+                    code="run_failed",
+                    message=(
+                        f"Unexpected {type(exc).__name__} before the workflow "
+                        "started. Please try again."
+                    ),
+                )
+                await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
 
         task = asyncio.create_task(_guarded(), name=f"jarvis-run-{run_id}")
         self._current_task = task

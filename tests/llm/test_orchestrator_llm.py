@@ -110,7 +110,9 @@ class TestOrchestratorLlm:
 
     async def test_narration_overrides_with_llm_text(self) -> None:
         llm = FakeLLM()
-        orchestrator, session, sent, send = make_orch({}, llm)
+        orchestrator, session, sent, send = make_orch(
+            {"jarvis_llm_streaming": False}, llm
+        )
 
         await orchestrator.handle_message(
             session, {"type": "chat", "text": "find python engineer"}, send=send
@@ -132,7 +134,9 @@ class TestOrchestratorLlm:
     async def test_provider_failure_falls_back_to_deterministic(self) -> None:
         llm = FakeLLM()
         llm.fail_generate = True
-        orchestrator, session, sent, send = make_orch({}, llm)
+        orchestrator, session, sent, send = make_orch(
+            {"jarvis_llm_streaming": False}, llm
+        )
 
         await orchestrator.handle_message(
             session, {"type": "chat", "text": "find python engineer"}, send=send
