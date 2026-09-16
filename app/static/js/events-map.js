@@ -43,7 +43,10 @@ export function mapEvent(envelope) {
       return { avatar: "thinking", runStatus: "running", runId: envelope.run_id };
 
     case "agent_thinking":
-      return { avatar: "thinking" };
+      return {
+        avatar: "thinking",
+        thinkingDetail: typeof data.detail === "string" ? data.detail : null,
+      };
 
     case "workflow_node_started":
       return {
@@ -97,10 +100,23 @@ export function mapEvent(envelope) {
       return { avatar: "speaking" };
 
     case "assistant_message":
+      // Normalize response: extract text from JSON if needed
+      let responseText = typeof data.text === "string" ? data.text : "";
+      // Handle JSON responses that might come through
+      if (responseText.startsWith('{') && responseText.endsWith('}')) {
+        try {
+          const parsed = JSON.parse(responseText);
+          if (typeof parsed.text === 'string') {
+            responseText = parsed.text;
+          }
+        } catch {
+          // If parsing fails, use original text
+        }
+      }
       return {
         avatar: null, // completion event decides the final state
         assistantMessage: {
-          text: typeof data.text === "string" ? data.text : "",
+          text: responseText,
           attachments: Array.isArray(data.attachments) ? data.attachments : [],
         },
       };

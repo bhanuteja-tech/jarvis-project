@@ -226,7 +226,7 @@ def build_summary(
     if latest_title_words:
         clean_title = " ".join(latest_title_words.split())
         role_clause = clean_title
-        evidence_refs.append("resume.experience[-1].title")
+        evidence_refs.append("resume.experience[0].title")
 
     years_clause = ""
     if total_years is not None:

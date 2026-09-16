@@ -382,6 +382,9 @@ _DEGREE_MAP: dict[str, DegreeLevel] = {
     "meng": DegreeLevel.MASTER,
     "ma": DegreeLevel.MASTER,
     "mba": DegreeLevel.MASTER,
+    "mtech": DegreeLevel.MASTER,
+    "m.tech": DegreeLevel.MASTER,
+    "m. tech": DegreeLevel.MASTER,
     "bachelor": DegreeLevel.BACHELOR,
     "bachelors": DegreeLevel.BACHELOR,
     "bsc": DegreeLevel.BACHELOR,
@@ -389,16 +392,23 @@ _DEGREE_MAP: dict[str, DegreeLevel] = {
     "ba": DegreeLevel.BACHELOR,
     "beng": DegreeLevel.BACHELOR,
     "btech": DegreeLevel.BACHELOR,
+    "b.tech": DegreeLevel.BACHELOR,
+    "b. tech": DegreeLevel.BACHELOR,
     "associate": DegreeLevel.ASSOCIATE,
     "aas": DegreeLevel.ASSOCIATE,
     "diploma": DegreeLevel.DIPLOMA,
     "bootcamp": DegreeLevel.BOOTCAMP,
+    "intermediate": DegreeLevel.DIPLOMA,
+    "junior college": DegreeLevel.DIPLOMA,
+    "high school": DegreeLevel.DIPLOMA,
+    "senior secondary": DegreeLevel.DIPLOMA,
+    "bieap": DegreeLevel.DIPLOMA,
 }
 _EDUCATION_LINE_RE = re.compile(
-    r"(?P<deg>phd|doctorate|mphil|masters?|msc|meng|mba|bachelors?|bsc|beng|btech|bs|ba|associate|aas|diploma|bootcamp)",
+    r"(?P<deg>phd|doctorate|mphil|masters?|m\.?\s*tech|b\.?\s*tech|msc|meng|mba|bachelors?|bsc|beng|btech|bs|ba|associate|aas|diploma|bootcamp|intermediate|junior\s+college|high\s+school|senior\s+secondary|bieap)",
     re.IGNORECASE,
 )
-_FIELD_RE = re.compile(r"(?:\bin\b|\bof\b)\s+(?P<field>[A-Z][A-Za-z&/ ]{2,48})", re.IGNORECASE)
+_FIELD_RE = re.compile(r"(?:\bin\b|\bof\b)\s+(?P<field>[A-Z][A-Za-z&/ ]{2,55})", re.IGNORECASE)
 _INSTITUTION_RE = re.compile(
     r"\b(?P<inst>[A-Z][\w.&' ]{2,60}?(?:University|College|Institute|School|Academy|Polytechnic))\b"
 )
@@ -415,24 +425,35 @@ def extract_education_items(segmentation, full_text: str) -> list[EducationItem]
     items: list[EducationItem] = []
     seen: set[str] = set()
     for candidate_text in search_texts:
-        for line in candidate_text.split("\n"):
+        lines = [line.strip() for line in candidate_text.split("\n") if line.strip()]
+        for idx, line in enumerate(lines):
             degree_match = _EDUCATION_LINE_RE.search(line)
             if degree_match is None:
                 continue
             degree_raw = degree_match.group("deg").lower()
-            level = _DEGREE_MAP.get(degree_raw)
+            # Normalize degree string (e.g. "m. tech" -> "mtech")
+            norm_deg_key = re.sub(r"[^a-z]+", "", degree_raw)
+            level = _DEGREE_MAP.get(norm_deg_key) or _DEGREE_MAP.get(degree_raw)
             canonical = level.value if level else degree_raw
 
-            field_match = _FIELD_RE.search(line)
+            # Search current line and adjacent line for field and institution
+            context_line = line
+            if idx > 0 and not _EDUCATION_LINE_RE.search(lines[idx - 1]):
+                context_line = lines[idx - 1] + " " + line
+            if idx + 1 < len(lines) and not _EDUCATION_LINE_RE.search(lines[idx + 1]):
+                context_line = context_line + " " + lines[idx + 1]
+
+            field_match = _FIELD_RE.search(context_line)
             field_of_study = (
                 field_match.group("field").strip().rstrip(",.;") if field_match else None
             )
-            institution_match = _INSTITUTION_RE.search(line)
-            years = [int(y) for y in _YEAR_RE.findall(line)]
+            institution_match = _INSTITUTION_RE.search(context_line)
+            years = [int(y) for y in _YEAR_RE.findall(context_line)]
             graduation_year = max(years) if years else None
 
-            inst_lower = institution_match.group("inst").lower() if institution_match else ""
-            key = f"{canonical}:{(field_of_study or '').lower()}:{inst_lower}"
+            inst_name = institution_match.group("inst").strip() if institution_match else None
+            inst_lower = inst_name.lower() if inst_name else ""
+            key = f"{canonical}:{(field_of_study or '').lower()}:{inst_lower}:{graduation_year}"
             if key in seen:
                 continue
             seen.add(key)
@@ -441,14 +462,12 @@ def extract_education_items(segmentation, full_text: str) -> list[EducationItem]
                     degree=canonical,
                     degree_raw=degree_raw,
                     field_of_study=field_of_study,
-                    institution=(
-                        institution_match.group("inst").strip() if institution_match else None
-                    ),
+                    institution=inst_name,
                     graduation_year=graduation_year,
                     evidence=Evidence(
-                        text=line.strip()[:200],
+                        text=context_line[:200],
                         field="resume.education",
-                        confidence=Confidence.MEDIUM,
+                        confidence=Confidence.HIGH,
                     ),
                 )
             )
@@ -458,7 +477,7 @@ def extract_education_items(segmentation, full_text: str) -> list[EducationItem]
 
 
 # ---------------------------------------------------------------------------
-# Certifications (local deterministic vocabulary)
+# Certifications (vocabulary + section bullet parser)
 # ---------------------------------------------------------------------------
 
 _CERT_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -481,6 +500,8 @@ def extract_certification_items(full_text: str) -> list[CertificationItem]:
     lowered = full_text.lower()
     items: list[CertificationItem] = []
     seen: set[str] = set()
+
+    # 1. Match explicit pattern registry
     for needle, display in _CERT_PATTERNS:
         position = lowered.find(needle)
         if position >= 0 and display not in seen:
@@ -495,12 +516,105 @@ def extract_certification_items(full_text: str) -> list[CertificationItem]:
                     ),
                 )
             )
+
+    # 2. Extract bulleted list under CERTIFICATIONS / WORKSHOPS / COURSES headers
+    lines = full_text.split("\n")
+    in_cert_section = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        header_clean = stripped.strip("#*-_= ").upper()
+        if header_clean in {
+            "CERTIFICATIONS", "CERTIFICATION", "CERTIFICATIONS/WORKSHOPS",
+            "WORKSHOPS", "CERTIFICATIONS & WORKSHOPS", "COURSES", "LICENSES & CERTIFICATIONS"
+        }:
+            in_cert_section = True
+            continue
+        elif in_cert_section and header_clean in {
+            "PROJECTS", "SKILLS", "TECHNICAL SKILLS", "EDUCATION",
+            "EXPERIENCE", "WORK EXPERIENCE", "SUMMARY",
+        }:
+            in_cert_section = False
+
+        if in_cert_section:
+            # Match bullet items or pipe/dash separated items
+            bullet_clean = re.sub(r"^[-•*·–—]\s*", "", stripped).strip()
+            # Handle lines with multiple bullets separated by '•' or '|'
+            parts = [p.strip() for p in re.split(r"[•|]", bullet_clean) if p.strip()]
+            for part in parts:
+                clean_part = re.sub(r"^[-•*·–—]\s*", "", part).strip()
+                if len(clean_part) >= 3 and not clean_part.startswith(("http://", "https://")):
+                    # Remove common certificate provider suffixes or prefixes if present
+                    name = clean_part
+                    evidence_text = clean_part[:120]
+                    items.append(
+                        CertificationItem(
+                            name=name,
+                            issuer=None,
+                            year=None,
+                            evidence=Evidence(
+                                text=evidence_text,
+                                field="resume.certifications",
+                                confidence=Confidence.HIGH,
+                            ),
+                        )
+                    )
+
     return items
 
 
 # ---------------------------------------------------------------------------
 # Projects
 # ---------------------------------------------------------------------------
+
+_CONTINUATION_WORDS: frozenset[str] = frozenset(
+    {
+        "and", "or", "with", "by", "for", "in", "on", "to", "from", "into", "using",
+        "enabling", "across", "including", "requiring", "down", "learned", "results",
+        "performance", "handles", "built", "deployed", "designed", "performed", "created",
+    }
+)
+
+
+def _is_project_header(line: str) -> bool:
+    line_s = line.strip()
+    if not line_s:
+        return False
+    # Link or demo reference lines are not project titles
+    if re.match(r"^(?:\[.*?\]\s*)+$", line_s) or line_s.startswith(
+        ("http://", "https://", "github.com", "www.", "demo:")
+    ):
+        return False
+    # Delimiters like '|', '::', or '—' / '–' followed by technologies/role
+    if "|" in line_s or " :: " in line_s or " — " in line_s or " – " in line_s:
+        part0 = re.split(r"[|::—–]", line_s)[0].strip()
+        if len(part0) > 0 and len(part0) <= 80 and part0[0].isupper():
+            return True
+    # If it starts with lowercase or continuation punctuation/brackets, not a title
+    if line_s[0].islower() or line_s.startswith((",", ";", "(", ")")):
+        return False
+    words = line_s.split()
+    first_word = words[0].lower().rstrip(":,")
+    if first_word in _CONTINUATION_WORDS:
+        return False
+    # Title heuristics: <= 80 chars, no sentence punctuation, starts with uppercase
+    if len(line_s) <= 80 and not line_s.endswith((".", ";")) and line_s[0].isupper():
+        capital_words = sum(1 for w in words if w[0].isupper())
+        if capital_words >= len(words) * 0.4:
+            return True
+    return False
+
+
+def _clean_project_name(raw_name: str) -> str:
+    cleaned = raw_name.lstrip("-•*·–— ").strip()
+    if "|" in cleaned:
+        cleaned = cleaned.split("|")[0].strip()
+    elif " :: " in cleaned:
+        cleaned = cleaned.split(" :: ")[0].strip()
+    elif " — " in cleaned:
+        cleaned = cleaned.split(" — ")[0].strip()
+    return cleaned
 
 
 def extract_project_items(segmentation) -> list[ProjectItem]:
@@ -537,40 +651,48 @@ def extract_project_items(segmentation) -> list[ProjectItem]:
             if not line:
                 continue
             is_bullet = bool(re.match(r"^[-•*·–—]\s+", line))
-            if not is_bullet:
-                # A non-bullet line starts a new project entry.
-                _finalize()
-                current = {
-                    "name": line.lstrip("-•*·–— ").strip(),
-                    "description": None,
-                    "url": None,
-                    "text": line,
-                }
-            else:
-                content = re.sub(r"^[-•*·–—]\s+", "", line)
+            if is_bullet:
+                content = re.sub(r"^[-•*·–—]\s+", "", line).strip()
                 if current is None:
                     current = {
-                        "name": content,
+                        "name": _clean_project_name(content),
                         "description": None,
                         "url": None,
                         "text": line,
                     }
                 else:
-                    current["description"] = (
-                        (current["description"] + " " if current["description"] else "")
-                        + content
-                    ).strip() or None
+                    if not re.match(r"^(?:\[.*?\]\s*)+$", content):
+                        current["description"] = (
+                            (current["description"] + " " if current["description"] else "")
+                            + content
+                        ).strip() or None
                     current["text"] += "\n" + line
+            else:
+                if current is None or _is_project_header(line):
+                    _finalize()
+                    current = {
+                        "name": _clean_project_name(line),
+                        "description": None,
+                        "url": None,
+                        "text": line,
+                    }
+                else:
+                    # Wrapped continuation of current bullet / description
+                    if not re.match(r"^(?:\[.*?\]\s*)+$", line):
+                        current["description"] = (
+                            (current["description"] + " " if current["description"] else "")
+                            + line
+                        ).strip() or None
+                    current["text"] += " " + line
         url_match = _URL_RE.search(block.text)
         if url_match is not None and current is not None:
             found_url = url_match.group(0)
             if current["url"] is None:
                 current["url"] = found_url
-            current["description"] = (
-                current["description"].replace(found_url, "").strip()
-                if current["description"]
-                else None
-            )
+            if current["description"]:
+                current["description"] = (
+                    current["description"].replace(found_url, "").strip() or None
+                )
     _finalize()
     return [item for item in items if item.name or item.description or item.url]
 

@@ -167,6 +167,38 @@ class TestProjects:
         tech = {skill.name for skill in items[0].technologies}
         assert {"python", "fastapi"} <= tech
 
+    def test_multiline_wrapped_bullet_projects(self) -> None:
+        raw = (
+            "PROJECTS\n"
+            "Olympics Trends and Analysis | Python, Pandas, Matplotlib, Streamlit\n"
+            "• Performed EDA on 270k+ Olympic Records to uncover Medal Dominance trends, and\n"
+            "performance shifts, enabling comparative analysis across 120 years of history.\n"
+            "• Deployed the application on Streamlit Community Cloud for public access.\n"
+            "• [GitHub Link] [Live Demo]\n"
+            "AI Powered News Research Assistant | Python, Streamlit, Lang Chain, FAISS\n"
+            "• Built a dual-mode research tool — an OpenAI semantic mode and an offline mode\n"
+            "requiring no API Key letting users query multiple news articles.\n"
+            "• Designed a custom source-balanced retrieval strategy to ensure answers draw\n"
+            "every processed article instead of one dominant source, using FAISS.\n"
+            "• [GitHub Link] [Live Demo]\n"
+            "AI Powered Data Analyst Agent | Python, Streamlit, pandas, LLM Integration\n"
+            "• Built an agent that lets users upload CSV files and query them. The agent\n"
+            "handles data cleaning, generates analysis code, and explains\n"
+            "results back in everyday language with streaming responses.\n"
+            "• Deployed on Render with Docker; the Streamlit frontend talks to FastAPI.\n"
+            "• [GitHub Link] [Live Demo]\n"
+        )
+        segmentation = segment_resume(build_document(raw, max_chars=30_000))
+        items = extract_project_items(segmentation)
+
+        assert len(items) == 3
+        assert items[0].name == "Olympics Trends and Analysis"
+        assert items[1].name == "AI Powered News Research Assistant"
+        assert items[2].name == "AI Powered Data Analyst Agent"
+        assert "performance shifts" in (items[0].description or "")
+        assert "requiring no API Key" in (items[1].description or "")
+        assert "handles data cleaning" in (items[2].description or "")
+
 
 class TestPreferences:
     def test_explicit_statements_only(self) -> None:

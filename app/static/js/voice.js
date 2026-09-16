@@ -80,16 +80,82 @@ export function startListening({
   };
 }
 
+let currentAudio = null;
+let currentAudioUrl = null;
+
+function stopCurrentAudio() {
+  if (currentAudio) {
+    try {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
+    currentAudio = null;
+  }
+  if (currentAudioUrl) {
+    try {
+      URL.revokeObjectURL(currentAudioUrl);
+    } catch {
+      /* ignore */
+    }
+    currentAudioUrl = null;
+  }
+}
+
 /**
  * Speak text when enabled; cancels any current utterance first.
+ * Attempts ElevenLabs high-fidelity TTS API first, falling back to Web Speech synthesis.
+ * @param {string} text
  * @param {object} opts
  * @param {boolean} opts.enabled
  * @param {() => void} [opts.onStart]
  * @param {() => void} [opts.onEnd]  fires on natural end and on cancel
  */
-export function speak(text, { enabled, onStart, onEnd } = {}) {
-  if (!ttsSupported()) return;
-  window.speechSynthesis.cancel();
+export async function speak(text, { enabled, onStart, onEnd } = {}) {
+  cancelSpeak();
+  if (!enabled || !text) return;
+
+  // 1. Try ElevenLabs API endpoint first
+  try {
+    const res = await fetch("/api/voice/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+
+    if (res.ok) {
+      const blob = await res.blob();
+      currentAudioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(currentAudioUrl);
+      currentAudio = audio;
+
+      audio.onplay = () => onStart?.();
+      audio.onended = () => {
+        stopCurrentAudio();
+        onEnd?.();
+      };
+      audio.onerror = () => {
+        stopCurrentAudio();
+        speakWebSpeech(text, { enabled, onStart, onEnd });
+      };
+
+      await audio.play();
+      return;
+    }
+  } catch (err) {
+    // ElevenLabs API unavailable or failed; fall back to Web Speech
+  }
+
+  // 2. Fallback to Web Speech Synthesis
+  speakWebSpeech(text, { enabled, onStart, onEnd });
+}
+
+function speakWebSpeech(text, { enabled, onStart, onEnd } = {}) {
+  if (!ttsSupported()) {
+    onEnd?.();
+    return;
+  }
   if (!enabled || !text) return;
 
   const utterance = new SpeechSynthesisUtterance(text);
@@ -101,7 +167,15 @@ export function speak(text, { enabled, onStart, onEnd } = {}) {
   window.speechSynthesis.speak(utterance);
 }
 
-/** Cancel current speech. onEnd handlers fire via utterance.onend/onerror. */
+/** Cancel current speech (both ElevenLabs audio and Web Speech). */
 export function cancelSpeak() {
-  if (ttsSupported()) window.speechSynthesis.cancel();
+  stopCurrentAudio();
+  if (ttsSupported()) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      /* ignore */
+    }
+  }
 }
+

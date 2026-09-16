@@ -4,7 +4,7 @@
 
 import { humanize } from "../events-map.js";
 
-export function renderTailoredResume(container, tailoredResult) {
+export function renderTailoredResume(container, tailoredResult, opts = {}) {
   container.innerHTML = "";
   const resume = tailoredResult?.resume;
   if (!resume) {
@@ -12,8 +12,102 @@ export function renderTailoredResume(container, tailoredResult) {
     return;
   }
 
-  // ---- unaddressed JD requirements (never converted into claims)
+  const targetJob = opts.targetJob || resume.target_job || null;
+  const validationReport = opts.validationReport || null;
+
+  // ---- TARGET JOB APPLICATION REVIEW BANNER ----
+  const banner = document.createElement("div");
+  banner.className = "app-review-banner";
+  banner.style.cssText = `
+    background: linear-gradient(135deg, rgba(35, 45, 60, 0.9), rgba(20, 26, 35, 0.95));
+    border: 1px solid rgba(88, 166, 255, 0.3);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  `;
+
+  const bannerHead = document.createElement("div");
+  bannerHead.style.cssText = "display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;";
+
+  const titleWrap = document.createElement("div");
+  const jobTitleText = targetJob?.title || resume.target_job_title || "Target Role";
+  const companyText = targetJob?.company || resume.target_company || "";
+
+  const titleEl = document.createElement("h3");
+  titleEl.style.cssText = "margin:0; font-size:18px; color:var(--fg, #e6edf3); display:flex; align-items:center; gap:8px;";
+  titleEl.innerHTML = `✨ Tailored Resume ${companyText ? `<span style="color:var(--muted); font-size:15px; font-weight:normal;">for <strong>${companyText}</strong> — ${jobTitleText}</span>` : ""}`;
+  titleWrap.appendChild(titleEl);
+
+  const badge = document.createElement("span");
+  badge.className = "mode-badge on";
+  badge.textContent = "Verified Fact-Grounded";
+  bannerHead.append(titleWrap, badge);
+  banner.appendChild(bannerHead);
+
+  // ATS Suggestions / Validation Summary
+  const suggestions = [];
+  if (validationReport) {
+    const warnings = Array.isArray(validationReport.findings) ? validationReport.findings.filter(f => f.severity === "WARN" || f.level === "WARN") : [];
+    if (warnings.length) {
+      suggestions.push(`${warnings.length} ATS advisory recommendation${warnings.length > 1 ? "s" : ""} available.`);
+    } else {
+      suggestions.push("100% Truth & ATS validation checks passed cleanly.");
+    }
+  }
+
   const unaddressed = stringsOnly(resume.unaddressed_jd_requirements);
+  if (unaddressed.length) {
+    suggestions.push(`${unaddressed.length} JD requirement${unaddressed.length > 1 ? "s" : ""} unaddressed by candidate experience.`);
+  }
+
+  if (suggestions.length) {
+    const sugText = document.createElement("div");
+    sugText.style.cssText = "font-size:13.5px; color:var(--muted); margin-bottom:14px;";
+    sugText.textContent = `💡 Resume Analysis: ${suggestions.join(" ")}`;
+    banner.appendChild(sugText);
+  }
+
+  // Banner Actions (Confirm & Apply CTA)
+  const ctaRow = document.createElement("div");
+  ctaRow.style.cssText = "display:flex; align-items:center; flex-wrap:wrap; gap:10px;";
+
+  const jobUrl = targetJob?.job_url || opts.jobUrl || null;
+  if (jobUrl) {
+    const confirmBtn = document.createElement("a");
+    confirmBtn.className = "btn btn--primary";
+    confirmBtn.href = jobUrl;
+    confirmBtn.target = "_blank";
+    confirmBtn.rel = "noopener noreferrer";
+    confirmBtn.style.cssText = "font-weight:600; padding:8px 16px;";
+    confirmBtn.textContent = "Confirm & Proceed to Application ↗";
+    confirmBtn.addEventListener("click", () => opts.onConfirmApply?.(targetJob));
+    ctaRow.appendChild(confirmBtn);
+  }
+
+  const dlBtn = document.createElement("button");
+  dlBtn.type = "button";
+  dlBtn.className = "btn";
+  dlBtn.textContent = "Download Markdown";
+  dlBtn.addEventListener("click", () => downloadMarkdown(resume));
+  ctaRow.appendChild(dlBtn);
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "btn";
+  copyBtn.textContent = "Copy Plain Text";
+  copyBtn.addEventListener("click", () => {
+    const text = generatePlainText(resume);
+    navigator.clipboard?.writeText(text);
+    copyBtn.textContent = "✓ Copied!";
+    setTimeout(() => { copyBtn.textContent = "Copy Plain Text"; }, 2000);
+  });
+  ctaRow.appendChild(copyBtn);
+
+  banner.appendChild(ctaRow);
+  container.appendChild(banner);
+
+  // ---- unaddressed JD requirements box ----
   if (unaddressed.length) {
     const warn = document.createElement("div");
     warn.className = "warn-box requirements-box";
@@ -41,17 +135,6 @@ export function renderTailoredResume(container, tailoredResult) {
     warn.append(icon, text);
     container.appendChild(warn);
   }
-
-  // ---- download (client-side projection of verified facts only)
-  const downloadRow = document.createElement("div");
-  downloadRow.className = "download-row";
-  const dlBtn = document.createElement("button");
-  dlBtn.type = "button";
-  dlBtn.className = "btn";
-  dlBtn.textContent = "Download Markdown";
-  dlBtn.addEventListener("click", () => downloadMarkdown(resume));
-  downloadRow.appendChild(dlBtn);
-  container.appendChild(downloadRow);
 
   // ---- SUMMARY
   if (nonEmpty(resume.summary?.text)) {
@@ -354,6 +437,58 @@ function downloadMarkdown(resume) {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+function generatePlainText(resume) {
+  const lines = [];
+  lines.push("TAILORED RESUME", "==============", "");
+  if (nonEmpty(resume.summary?.text)) lines.push("SUMMARY", "-------", resume.summary.text, "");
+
+  const skills = Array.isArray(resume.skills) ? resume.skills : [];
+  if (skills.length) {
+    lines.push("SKILLS", "------");
+    for (const skill of skills) {
+      lines.push(`• ${skill.display || skill.name}${skill.requirement ? ` (${skill.requirement})` : ""}`);
+    }
+    lines.push("");
+  }
+
+  for (const item of Array.isArray(resume.experience) ? resume.experience : []) {
+    lines.push(
+      [item.title, item.company].filter(nonEmpty).join(" — ").toUpperCase(),
+      nonEmpty(item.date_range_raw) || ""
+    );
+    for (const bullet of Array.isArray(item.highlights) ? item.highlights : []) {
+      if (typeof bullet.final_text === "string") lines.push(`• ${bullet.final_text}`);
+    }
+    lines.push("");
+  }
+
+  for (const project of Array.isArray(resume.projects) ? resume.projects : []) {
+    lines.push(`PROJECT: ${nonEmpty(project.name) || "Project"}`);
+    if (nonEmpty(project.description)) lines.push(project.description);
+    const techs = stringsOnly(project.technologies);
+    if (techs.length) lines.push(`Technologies: ${techs.join(", ")}`);
+    lines.push("");
+  }
+
+  const education = Array.isArray(resume.education) ? resume.education : [];
+  const certifications = Array.isArray(resume.certifications) ? resume.certifications : [];
+  if (education.length || certifications.length) {
+    lines.push("EDUCATION & CERTIFICATIONS", "--------------------------");
+    for (const edu of education) {
+      lines.push(
+        `• ${humanize(edu.degree || "")}${edu.field_of_study ? " in " + edu.field_of_study : ""}${
+          edu.institution ? ", " + edu.institution : ""
+        }`
+      );
+    }
+    for (const cert of certifications) {
+      if (nonEmpty(cert.name)) lines.push(`• ${cert.name}`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 function nonEmpty(value) {

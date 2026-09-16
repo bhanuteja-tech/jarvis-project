@@ -126,7 +126,7 @@ class TestSummaryTemplate:
         text, refs = build_summary("Data Engineer", 6.0, ["python", "sql"])
 
         assert text == ("Data Engineer with 6 years of experience, focused on python, sql.")
-        assert "resume.experience[-1].title" in refs
+        assert "resume.experience[0].title" in refs
 
     def test_years_none_omits_clause(self) -> None:
         text, _refs = build_summary("Data Engineer", None, ["python"])

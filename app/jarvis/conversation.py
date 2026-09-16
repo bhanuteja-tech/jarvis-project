@@ -57,9 +57,27 @@ DETERMINISTIC_REPLIES = {
 }
 
 
-def deterministic_reply(intent: str, text: str) -> str | None:
+def deterministic_reply(intent: str, text: str, resume_context: str | None = None) -> str | None:
     """Offline answers for the simplest conversational intents."""
     lowered = text.strip().lower().rstrip("!.")
+    resume_cues = (
+        "see my resume", "uploaded my resume", "uploaded resume",
+        "get my resume", "view my resume", "have my resume", "access my resume",
+    )
+    if any(phrase in lowered for phrase in resume_cues):
+        if resume_context and "successfully parsed" in resume_context:
+            return (
+                "Yes! Your resume has been uploaded and parsed into your Candidate Profile. "
+                "You can see your extracted skills, experience, education, and projects in "
+                "the Resume Workspace panel on the right."
+            )
+        if resume_context and "uploaded" in resume_context:
+            return "Yes, a resume file was uploaded in this session and processed."
+        return (
+            "No resume has been uploaded yet in this session. You can upload your resume "
+            "(PDF, DOCX, TXT) anytime using the paperclip button or drag & drop."
+        )
+
     if intent == "casual_chat":
         for cue, reply in DETERMINISTIC_REPLIES["casual_chat"]:
             if lowered == cue or lowered.startswith(cue + " ") is False and lowered == cue:
@@ -94,6 +112,7 @@ async def converse(
     user_text: str,
     on_delta: Any = None,
     system_override: str | None = None,
+    resume_context: str | None = None,
 ) -> ConversationResult | None:
     """One conversational turn. Returns None when no LLM is available.
 
@@ -105,6 +124,8 @@ async def converse(
 
     messages = recent_messages(history)
     system = system_override or SYSTEM_PROMPT
+    if resume_context:
+        system = f"{system}\n\n[Active Session Resume Context]: {resume_context}"
     started = time.perf_counter()
     collected: list[str] = []
 

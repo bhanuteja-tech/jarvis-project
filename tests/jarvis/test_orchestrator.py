@@ -189,3 +189,47 @@ class TestResumeUpload:
 
         errors = [e for e in sent if e["type"] == "error"]
         assert errors and errors[0]["data"]["code"] == "unsupported_format"
+
+
+class TestLastQuery:
+    def test_last_query_skips_tailor_commands(self) -> None:
+        from app.jarvis.orchestrator import _last_query
+        from app.jarvis.sessions import InMemorySessionStore
+
+        store = InMemorySessionStore()
+        session = store.get_or_create("s1")
+        session.append_message("user", "Find ML intern jobs in india")
+        session.append_message("assistant", "Found 10 jobs")
+        session.append_message("user", "Tailor resume for job #1")
+
+        assert _last_query(session) == "Find ML intern jobs in india"
+
+    def test_last_query_fallbacks_to_last_state(self) -> None:
+        from app.jarvis.orchestrator import _last_query
+        from app.jarvis.sessions import InMemorySessionStore
+
+        store = InMemorySessionStore()
+        session = store.get_or_create("s2")
+        session.last_state = {"user_query": "Machine learning engineer in Bangalore"}
+        session.append_message("user", "Tailor job 2")
+
+        assert _last_query(session) == "Machine learning engineer in Bangalore"
+
+
+class TestCleanLlmText:
+    def test_extracts_json_text_field(self) -> None:
+        from app.jarvis.orchestrator import _clean_llm_text
+        raw = '{"text": "Discovered 5 jobs in Bangalore."}'
+        assert _clean_llm_text(raw, "fallback") == "Discovered 5 jobs in Bangalore."
+
+    def test_handles_malformed_pseudo_json(self) -> None:
+        from app.jarvis.orchestrator import _clean_llm_text
+        raw = '{"text": "No job opportunities were found.", "extra": "invalid json format}'
+        assert _clean_llm_text(raw, "fallback") == "No job opportunities were found."
+
+    def test_falls_back_when_raw_json_has_no_text_field(self) -> None:
+        from app.jarvis.orchestrator import _clean_llm_text
+        raw = '{"bad_key": 123}'
+        assert _clean_llm_text(raw, "fallback_reply") == "fallback_reply"
+
+

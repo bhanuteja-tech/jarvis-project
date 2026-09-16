@@ -310,6 +310,20 @@ class TestSavedJobsAndHome:
             # no run yet -> job_not_found, but endpoint must be safe
             assert r.status_code == 200
 
+            # Direct job payload save (e.g. from apply workflow)
+            r2 = c.post(
+                "/api/jobs/saved?session_id=A",
+                json={
+                    "job_key": "stripe-123",
+                    "title": "Software Engineer",
+                    "company": "Stripe",
+                    "status": "applied",
+                },
+            )
+            assert r2.status_code == 200
+            assert r2.json()["saved"] is True
+            assert r2.json()["job"]["status"] == "applied"
+
     def test_home_context_shape(self) -> None:
         from fastapi.testclient import TestClient
 

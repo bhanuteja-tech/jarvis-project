@@ -42,6 +42,7 @@ class OpenAICompatibleClient:
         *,
         api_key: str,
         default_base_url: str,
+        model_override: str | None = None,
         extra_headers: dict[str, str] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         retry_policy: RetryPolicy | None = None,
@@ -50,13 +51,22 @@ class OpenAICompatibleClient:
         self._api_key = api_key
         self._base_url = (
             settings.jarvis_llm_base_url.strip().rstrip("/")
-            or default_base_url
+            if (
+                settings.jarvis_llm_base_url
+                and "openrouter" not in default_base_url
+                and "openai" not in default_base_url
+            )
+            else default_base_url
         )
         self._extra_headers = extra_headers or {}
         self._transport = transport
         self._retry_policy = retry_policy or RetryPolicy()
         self.enabled = True
-        self.model_name = settings.jarvis_llm_model.strip()
+        self.model_name = (
+            model_override.strip()
+            if model_override and model_override.strip()
+            else settings.jarvis_llm_model.strip()
+        )
 
     # ---- request scaffolding ---------------------------------------------------
 

@@ -244,16 +244,26 @@ def configured_provider_names(settings: Settings) -> list[str]:
 
 def model_for_provider(name: str, settings: Settings) -> str:
     generic = (settings.jarvis_llm_model or "").strip()
-    if name == "deepseek":
-        return (settings.deepseek_model or "").strip() or generic
-    if name == "moonshot":
-        return (settings.moonshot_model or "").strip() or generic
-    if name == "gemini":
-        return (settings.gemini_model or "").strip() or generic
-    if name == "anthropic":
-        return (settings.anthropic_model or "").strip() or generic
-    if name == "ollama":
-        return generic or (settings.ollama_model or "").strip()
+    key = (name or "").strip().lower()
+    if key == "openrouter":
+        openrouter_m = getattr(settings, "openrouter_model", "") or ""
+        default_or_m = (
+            generic if generic and "/" in generic else "meta-llama/llama-3.3-70b-instruct"
+        )
+        return str(openrouter_m).strip() or default_or_m
+    if key == "openai":
+        openai_m = getattr(settings, "openai_model", "") or ""
+        return str(openai_m).strip() or generic or "gpt-4o-mini"
+    if key == "deepseek":
+        return (settings.deepseek_model or "").strip() or generic or "deepseek-chat"
+    if key == "moonshot":
+        return (settings.moonshot_model or "").strip() or generic or "moonshot-v1-8k"
+    if key == "gemini":
+        return (settings.gemini_model or "").strip() or generic or "gemini-2.0-flash"
+    if key == "anthropic":
+        return (settings.anthropic_model or "").strip() or generic or "claude-3-5-sonnet-20241022"
+    if key == "ollama":
+        return generic or (settings.ollama_model or "").strip() or "llama3.2:3b"
     return generic
 
 

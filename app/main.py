@@ -15,11 +15,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes.health import router as health_router
 from app.api.routes.jarvis import router as jarvis_router
 from app.api.routes.llm import router as llm_router
+from app.api.routes.voice import router as voice_router
 from app.config.settings import Settings, get_settings
 from app.db.session import create_db_engine
 from app.logging_setup import configure_logging
@@ -49,13 +51,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "and validation with an agentic Jarvis interface.",
         lifespan=lifespan,
     )
+
+    # Add CORS middleware for React frontend
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     application.include_router(health_router)
     application.include_router(jarvis_router)
     application.include_router(llm_router)
+    application.include_router(voice_router)
 
+    # Serve React frontend from build directory if available, otherwise static
+    frontend_dir = Path(__file__).resolve().parent / "static" / "dist"
     static_dir = Path(__file__).resolve().parent / "static"
-    if static_dir.is_dir():
-        application.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+
+    if frontend_dir.is_dir():
+        application.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+    else:
+        if static_dir.is_dir():
+            application.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
 
     # Available immediately (not only within the lifespan) so probes and
     # tests can access wiring without running startup events.

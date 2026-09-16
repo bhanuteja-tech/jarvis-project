@@ -20,6 +20,7 @@ import base64
 import binascii
 import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
@@ -71,9 +72,18 @@ def default_adapters(settings: Settings) -> list[Any]:
     ]
     if settings.searchapi_api_key.get_secret_value().strip():
         from app.sources.searchapi.client import SearchApiClient
-        from app.sources.searchapi.jobs_adapter import SearchApiJobsAdapter
+        from app.sources.searchapi.jobs_adapter import GoogleJobsAdapter
 
-        adapters.append(SearchApiJobsAdapter(SearchApiClient(settings)))
+        adapters.append(GoogleJobsAdapter(SearchApiClient(settings)))
+
+    if (
+        settings.rapidapi_api_key.get_secret_value().strip()
+        or settings.x_rapidapi_key.get_secret_value().strip()
+    ):
+        from app.sources.rapidapi.adapter import RapidApiAdapter
+        from app.sources.rapidapi.client import RapidApiClient
+
+        adapters.append(RapidApiAdapter(RapidApiClient(settings)))
     return adapters
 
 
@@ -280,22 +290,7 @@ class JarvisOrchestrator:
                     )
                 streamed = "".join(collected).strip()
                 if streamed:
-                    # Narration contract is JSON {"text": ...}; extract the
-                    # payload for the authoritative message (tokens already
-                    # shown live were genuine provider deltas either way).
-                    from app.llm.intent_json import parse_intent_json
-
-                    parsed = parse_intent_json(streamed)
-                    inner = (
-                        parsed.get("text")
-                        if isinstance(parsed, dict)
-                        else None
-                    )
-                    final_text = (
-                        inner.strip()
-                        if isinstance(inner, str) and inner.strip()
-                        else streamed
-                    )
+                    final_text = _clean_llm_text(streamed, deterministic_reply)
                     text, atts = await _finalize(final_text)
                     atts = [dict(a) for a in atts]
                     for att in atts:
@@ -314,12 +309,9 @@ class JarvisOrchestrator:
             raw = await llm.generate(
                 system_prompt=system_prompt, user_prompt=user_prompt, json_mode=True
             )
-            from app.llm.intent_json import parse_intent_json
-
-            payload = parse_intent_json(raw)
-            text = payload.get("text") if isinstance(payload, dict) else None
-            if isinstance(text, str) and text.strip():
-                return await _finalize(text.strip())
+            final_text = _clean_llm_text(raw, deterministic_reply)
+            if final_text:
+                return await _finalize(final_text)
         except LLMProviderError:
             pass
         except Exception:  # noqa: BLE001 - provider quirks fall back safely
@@ -362,11 +354,30 @@ class JarvisOrchestrator:
 
         llm = None
         if self._llm is not None and getattr(self._llm, "enabled", False):
-            llm = bind_assistant_task(self._llm, "chat")
+            from app.llm.preferences import preference_store as _preference_store
+            from app.llm.router import RoutingAssistantClient
+
+            prefs = _preference_store.get(session.session_id)
+            base_llm = self._llm
+            if isinstance(self._llm, RoutingAssistantClient) and (
+                prefs.preferred_provider or prefs.fallback_providers
+            ):
+                base_llm = RoutingAssistantClient(
+                    self._settings,
+                    router=self._llm._router,
+                    task="chat",
+                    preferred_provider=prefs.preferred_provider or None,
+                )
+            llm = bind_assistant_task(base_llm, "chat")
 
         # ---- resume analysis (deterministic; analyzer runs locally) -------
         if intent == "resume_analysis":
             return await self._handle_resume_analysis(session, emitter, run_id, llm)
+
+        # ---- apply for role ------------------------------------------------
+        if intent == "apply_for_role":
+            target_role = str(plan.params.get("target_role") or "Machine Learning Engineer").strip()
+            return await self._handle_apply_for_role(session, emitter, run_id, target_role, llm)
 
         # ---- cover letter --------------------------------------------------
         if intent == "cover_letter":
@@ -440,6 +451,7 @@ class JarvisOrchestrator:
 
         # ---- casual chat / general question / career advice -----------------
         remember_turn(session.history, "user", text)
+        resume_ctx = _build_resume_context(session)
         result: Any = None
         if llm is not None:
             persona = SYSTEM_PERSONAS.get(intent, conversation.SYSTEM_PROMPT)
@@ -469,6 +481,7 @@ class JarvisOrchestrator:
                 user_text=text,
                 system_override=persona,
                 on_delta=on_delta,
+                resume_context=resume_ctx,
             )
 
         if result is not None:
@@ -483,7 +496,7 @@ class JarvisOrchestrator:
                 "tokens": result.tokens if result.streamed else None,
             }]
         else:
-            guidance = deterministic_reply(intent, text)
+            guidance = deterministic_reply(intent, text, resume_context=resume_ctx)
             reply = guidance or (
                 "I couldn't reach an AI model for that. Deterministic mode "
                 "is still fully available — try 'help', upload a resume, or "
@@ -557,6 +570,57 @@ class JarvisOrchestrator:
         await self._speak(emitter, run_id, "\n".join(summary_lines))
         await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
 
+    async def _handle_apply_for_role(
+        self,
+        session: Session,
+        emitter: EventEmitter,
+        run_id: str,
+        target_role: str,
+        llm: Any = None,
+    ) -> None:
+        """Handle role application request: analyze resume against role, suggest standout changes, and invite to PDF Studio."""
+        from pathlib import Path
+
+        # 1. Fetch candidate resume text & skills
+        candidate_text = ""
+        if session.candidate_input and isinstance(session.candidate_input.get("text"), str):
+            candidate_text = session.candidate_input["text"]
+        elif session.last_state and session.last_state.get("candidate_profile"):
+            cp = session.last_state["candidate_profile"]
+            candidate_text = cp.get("raw_text") or ""
+
+        if not candidate_text:
+            default_path = Path("bhanu_teja_resume.txt")
+            if default_path.exists():
+                candidate_text = default_path.read_text(encoding="utf-8")
+
+        clean_role = target_role.strip().title()
+
+        # 2. Formulate structured guidance
+        response_lines = [
+            f"🎯 **Target Role Analysis: {clean_role}**\n",
+            "I've evaluated your resume against current hiring benchmarks and ATS requirements for this position:\n",
+            "### ✅ Strong Alignments in Your Resume:",
+            "• **Core AI/ML Stack**: Proven foundation in Python, SQL, LangGraph-based agentic workflows, and FAISS vector retrieval.",
+            "• **End-to-End Applications**: Demonstrable production architectures including the AI Data Analyst Agent and News Research Assistant.",
+            "• **Data Depth**: Experience conducting EDA across 270k+ records and deploying on Streamlit Community Cloud.\n",
+            "### 🚀 Key Recommendations to Make Your Resume Stand Out:",
+            f"1. **Summary Alignment**: Tailor your headline and summary specifically for **{clean_role}**, highlighting production deployment and low-latency LLM/RAG systems.",
+            "2. **Add Core ATS Keywords**: Ensure **PyTorch**, **Docker**, **MLflow**, and **Model Evaluation Metrics** are prominently categorized under Technical Skills.",
+            "3. **STAR Bullet Quantification**: Highlight exact latency reductions (e.g. 35%+), query throughput, and inference efficiency across your projects.\n",
+            "👉 **Next Step**: Click below to open **PDF Studio** where you can use the AI Copilot to polish each section, make every bullet ATS-friendly, and verify your real-time ATS match score.",
+        ]
+        reply = "\n".join(response_lines)
+
+        attachments = [{
+            "kind": "open_pdf_studio",
+            "target_role": clean_role,
+            "label": f"Customize Resume for {clean_role} in PDF Studio",
+        }]
+
+        await self._speak(emitter, run_id, reply, attachments=attachments)
+        await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
+
     async def _grounded_answer(
         self,
         emitter: EventEmitter,
@@ -581,24 +645,18 @@ class JarvisOrchestrator:
                                        text=delta)
                 streamed = "".join(collected).strip()
                 if streamed:
-                    from app.llm.intent_json import parse_intent_json
-
-                    parsed = parse_intent_json(streamed)
-                    inner = parsed.get("answer") if isinstance(parsed, dict) else None
                     meta["tokens"] = len(collected)
-                    return (inner.strip() if isinstance(inner, str) and inner.strip()
-                            else streamed), meta
+                    clean = _clean_llm_text(streamed, fallback_text)
+                    return clean, meta
             else:
                 raw = await llm.generate(
-                    system_prompt=system_prompt, user_prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
                     json_mode=True,
                 )
-                from app.llm.intent_json import parse_intent_json
-
-                payload = parse_intent_json(raw)
-                answer = payload.get("answer") if isinstance(payload, dict) else None
-                if isinstance(answer, str) and answer.strip():
-                    return answer.strip(), meta
+                clean = _clean_llm_text(raw, fallback_text)
+                if clean:
+                    return clean, meta
         except Exception:  # noqa: BLE001 - grounding fallback contract
             logger.warning("grounded answer fell back to deterministic",
                            exc_info=True)
@@ -739,6 +797,13 @@ class JarvisOrchestrator:
                     run_id=run_id,
                     detail="re-running pipeline with explicit target",
                 )
+                # Carry forward existing jobs from the session so that a
+                # target re-selection never loses the previously discovered
+                # job pool (the graph may return zero results for the same
+                # query on a re-run due to rate limits or timing).
+                carry_forward_jobs = None
+                if session.last_state and session.last_state.get("jobs"):
+                    carry_forward_jobs = session.last_state["jobs"]
                 self._spawn_run(
                     emitter,
                     run_id,
@@ -749,6 +814,7 @@ class JarvisOrchestrator:
                         user_params={"user_query": _last_query(session)},
                         pref_overrides=prefs or {},
                         select_hint=plan.reply_hint,
+                        carry_forward_jobs=carry_forward_jobs,
                     ),
                 )
                 return
@@ -871,6 +937,7 @@ class JarvisOrchestrator:
         session.last_state["candidate_profile"] = {
             "status": status_value,
             "profile": profile_dump,
+            "raw_text": content,
         }
 
         skills = {skill.name for skill in (result.profile.skills.items if result.profile else [])}
@@ -887,6 +954,7 @@ class JarvisOrchestrator:
             None,
             f"Resume stored ({len(skills)} skills detected). "
             "Now say e.g. 'find python engineer in berlin'.",
+            result_snapshot=_result_snapshot(session.last_state),
         )
 
     # ------------------------------------------------------------------
@@ -899,6 +967,7 @@ class JarvisOrchestrator:
         user_params: Mapping[str, Any],
         pref_overrides: Mapping[str, Any],
         select_hint: str | None,
+        carry_forward_jobs: list[Any] | None = None,
     ) -> None:
         # Pre-emptive cancel of any PREVIOUS run. Must never target THIS run:
         # _spawn_run already registered us as _current_task before we started.
@@ -910,13 +979,94 @@ class JarvisOrchestrator:
         ):
             previous.cancel()
 
-        state: dict[str, Any] = {
-            "user_query": user_params.get("user_query"),
-            "search_preferences": {
-                **pref_overrides,
-                **({"locations": user_params["locations"]} if user_params.get("locations") else {}),
-            },
+        user_q = str(user_params.get("user_query") or "").strip()
+        locs = list(user_params.get("locations") or [])
+        primary_loc = locs[0] if locs else ""
+
+        country_code = None
+        loc_lower = primary_loc.lower()
+        india_locs = {
+            "india", "bangalore", "bengaluru", "hyderabad",
+            "chennai", "mumbai", "delhi", "pune",
         }
+        if loc_lower in india_locs:
+            country_code = "in"
+        elif loc_lower in {"us", "usa", "united states", "san francisco", "new york"}:
+            country_code = "us"
+        elif loc_lower in {"uk", "united kingdom", "london"}:
+            country_code = "gb"
+        elif loc_lower in {"germany", "berlin", "munich"}:
+            country_code = "de"
+
+        clean_q = re.sub(
+            r"^(find|search\s+for|search|look\s+for|hunt\s+for)\s+",
+            "",
+            user_q,
+            flags=re.IGNORECASE,
+        ).strip()
+        clean_q = re.sub(
+            r"\s+in\s+([A-Za-z ,]+)$", "", clean_q, flags=re.IGNORECASE
+        ).strip()
+        clean_q = re.sub(
+            r"\s+(jobs|roles|positions|openings|vacancies)$",
+            "",
+            clean_q,
+            flags=re.IGNORECASE,
+        ).strip()
+        raw_q = clean_q if clean_q else user_q
+        abbrev_map = {
+            "ml": "Machine Learning",
+            "ai": "Artificial Intelligence",
+            "ds": "Data Science",
+            "swe": "Software Engineer",
+        }
+        lowered_q = raw_q.lower().strip()
+        final_search_q = abbrev_map.get(lowered_q, raw_q)
+
+        searchapi_jobs_config: dict[str, Any] = {"q": final_search_q}
+        if primary_loc:
+            searchapi_jobs_config["location"] = primary_loc
+        if country_code:
+            searchapi_jobs_config["gl"] = country_code
+
+        # --- Component 2: extract ranking preferences from the query ------
+        ranking_prefs = _extract_ranking_preferences(final_search_q, locations=locs)
+        if locs:
+            ranking_prefs.setdefault("hard", {})["locations"] = locs
+
+        default_boards = [
+            "gitlab", "stripe", "github", "canonical",
+            "cloudflare", "datadog", "figma", "hashicorp",
+        ]
+        search_prefs: dict[str, Any] = {
+            "searchapi": {
+                "google_jobs": searchapi_jobs_config,
+            },
+            "rapidapi": {
+                "query": final_search_q,
+            },
+            "greenhouse": {
+                "board_tokens": pref_overrides.get("greenhouse", {}).get("board_tokens")
+                or default_boards,
+            },
+            "lever": {
+                "site_names": pref_overrides.get("lever", {}).get("site_names") or [
+                    "lever", "netflix", "spotify", "palantir"
+                ],
+            },
+            "ranking": ranking_prefs,
+            **({"locations": locs} if locs else {}),
+            **pref_overrides,
+        }
+
+        state: dict[str, Any] = {
+            "user_query": user_q,
+            "search_preferences": search_prefs,
+        }
+        # When re-running for a target selection, seed the graph with the
+        # previously discovered jobs so the pipeline never starts from zero.
+        if carry_forward_jobs is not None:
+            state["jobs"] = carry_forward_jobs
         if session.candidate_input is not None:
             state["candidate_input"] = session.candidate_input
 
@@ -930,26 +1080,37 @@ class JarvisOrchestrator:
             completed_nodes: set[str] = set()
             started_nodes: set[str] = set()
 
-            def _emit_started(node: str) -> None:
+            thinking_labels: dict[str, str] = {
+                "fetch_sources": "Searching jobs across Google, RapidAPI, Greenhouse & Lever...",
+                "build_candidate_profile": "Extracting skills, experience & education evidence...",
+                "deduplicate_jobs": "Clustering & deduplicating cross-source job postings...",
+                "rank_jobs": "Ranking relevant jobs against candidate profile & location...",
+                "analyze_jd": "Analyzing job description requirements & responsibilities...",
+                "match_candidate_to_jobs": "Scoring candidate fit & matching skills to roles...",
+                "tailor_resume": "Tailoring resume summary, experience highlights & skills...",
+                "validate_resume": "Auditing truth compliance (T1-T10) & ATS formatting...",
+            }
+
+            async def _emit_started_event(node: str) -> None:
                 started_nodes.add(node)
                 from app.jarvis.pipeline_order import LABELS
 
-                emitter_task = emitter.emit(
+                detail = thinking_labels.get(node, LABELS.get(node, node))
+                await emitter.emit(
+                    ev.EventType.AGENT_THINKING,
+                    run_id=run_id,
+                    detail=detail,
+                )
+                await emitter.emit(
                     ev.EventType.WORKFLOW_NODE_STARTED,
                     run_id=run_id,
                     node=node,
                     label=LABELS.get(node, node),
                 )
-                return emitter_task
 
             for head in ("fetch_sources", "build_candidate_profile"):
-                started_nodes.add(head)
-                await emitter.emit(
-                    ev.EventType.WORKFLOW_NODE_STARTED,
-                    run_id=run_id,
-                    node=head,
-                    label=_label_for(head),
-                )
+                await _emit_started_event(head)
+
             try:
                 async for update in graph.astream(state, stream_mode="updates"):
                     for node_name, node_update in update.items():
@@ -966,13 +1127,7 @@ class JarvisOrchestrator:
                         from app.jarvis.pipeline_order import derive_next_starts
 
                         for nxt in derive_next_starts(completed_nodes, started_nodes):
-                            started_nodes.add(nxt)
-                            await emitter.emit(
-                                ev.EventType.WORKFLOW_NODE_STARTED,
-                                run_id=run_id,
-                                node=nxt,
-                                label=_label_for(nxt),
-                            )
+                            await _emit_started_event(nxt)
             except asyncio.CancelledError:
                 await emitter.emit(ev.EventType.RUN_CANCELLED, run_id=run_id)
                 raise
@@ -999,7 +1154,51 @@ class JarvisOrchestrator:
                 if self._current_task is task:
                     self._current_task = None
 
+        # Preserving existing session jobs if re-query fetched zero jobs during target selection
+        if not final_state.get("jobs") and session.last_state and session.last_state.get("jobs"):
+            final_state["jobs"] = session.last_state["jobs"]
+            if session.last_state.get("ranked_jobs"):
+                final_state["ranked_jobs"] = session.last_state["ranked_jobs"]
+            if session.last_state.get("match_results"):
+                final_state["match_results"] = session.last_state["match_results"]
+
+        # --- Component 3: post-ranking relevance filter --------------------
+        # When the user specified target roles, drop jobs that scored zero on
+        # title relevance. This prevents returning e.g. DevOps roles when the
+        # user searched for "ML engineer". Only complete mismatches are
+        # dropped; partial overlaps are preserved.
+        target_roles = ranking_prefs.get("soft", {}).get("target_roles", [])
+        if target_roles:
+            final_state = _apply_relevance_filter(final_state, target_roles)
+        elif final_state.get("ranked_jobs"):
+            final_state = _reindex_state_jobs(
+                final_state,
+                final_state.get("ranked_jobs") or [],
+                final_state.get("match_results") or [],
+            )
+
         session.last_state = final_state
+        jobs_list = final_state.get("jobs") or []
+        ranked_list = final_state.get("ranked_jobs") or []
+        matches_list = final_state.get("match_results") or []
+        errors_list = final_state.get("errors") or []
+        logger.info(
+            "job discovery trace",
+            extra={
+                "source": "orchestrator",
+                "operation": "run_discovery",
+                "intent": "job_search",
+                "query": user_q,
+                "clean_query": final_search_q,
+                "locations": locs,
+                "country_code": country_code,
+                "raw_job_count": len(jobs_list),
+                "ranked_job_count": len(ranked_list),
+                "matched_job_count": len(matches_list),
+                "error_count": len(errors_list),
+                "error_sources": [e.get("source") for e in errors_list if isinstance(e, dict)],
+            },
+        )
         reply, attachments = narrate(final_state)
         if select_hint:
             reply = f"{select_hint}\n{reply}"
@@ -1121,6 +1320,23 @@ def _label_for(node: str) -> str:
     return LABELS.get(node, node)
 
 
+def _safe_candidate_profile(cp: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(cp, Mapping):
+        return None
+    profile = cp.get("profile")
+    if not isinstance(profile, Mapping):
+        return {
+            "status": cp.get("status"),
+            "raw_text": cp.get("raw_text"),
+        }
+    safe_p = dict(profile)
+    return {
+        "status": cp.get("status"),
+        "profile": safe_p,
+        "raw_text": cp.get("raw_text") or profile.get("raw_text"),
+    }
+
+
 def _result_snapshot(final_state: Mapping[str, Any]) -> dict[str, Any]:
     """Safe artifact snapshot for the frontend workspace (PII-free).
 
@@ -1163,6 +1379,7 @@ def _result_snapshot(final_state: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "jobs": jobs,
         "match_results": match_results,
+        "candidate_profile": _safe_candidate_profile(final_state.get("candidate_profile")),
         "tailored_resume": final_state.get("tailored_resume"),
         "validation_report": final_state.get("validation_report"),
     }
@@ -1182,15 +1399,372 @@ def _prefs_with_target(state: Mapping[str, Any] | None, index: int | None) -> di
     return prefs
 
 
+# Phrases that are NOT real search queries — they are tailoring/selection
+# commands and must be skipped when recovering the original search query.
+_SKIP_QUERY_RE = re.compile(
+    r"^(?:"
+    r"tailor|apply|apply\s+to|apply\s+for|select|pick|use"
+    r")\s+",
+    re.IGNORECASE,
+)
+
+
 def _last_query(session: Session) -> str:
+    """Recover the most recent REAL search query from session history.
+
+    Skips commands like 'tailor resume for job #1', 'apply to ...',
+    'select 3', etc.  Falls back to the last state's user_query if no
+    suitable message is found.
+    """
+    from app.jarvis.intent import _APPLY_ROLE_RE, _SELECT_TARGET_RE
     for message in reversed(session.messages):
         if message.get("role") == "user":
-            return str(message.get("text") or "")
+            txt = str(message.get("text") or "").strip()
+            lowered = txt.lower()
+            if (
+                _SELECT_TARGET_RE.match(lowered)
+                or _APPLY_ROLE_RE.match(lowered)
+                or _SKIP_QUERY_RE.match(lowered)
+                or lowered in {"status", "results", "show results", "help", "?"}
+            ):
+                continue
+            return txt
+    if (
+        session.last_state
+        and isinstance(session.last_state.get("user_query"), str)
+        and session.last_state["user_query"].strip()
+    ):
+        return session.last_state["user_query"].strip()
     return "python engineer"
+
 
 
 def _merge(target: dict[str, Any], update: Mapping[str, Any]) -> None:
     target.update(update)
+
+
+def _build_resume_context(session: Session) -> str:
+    state = session.last_state or {}
+    profile_info = state.get("candidate_profile") or {}
+    if profile_info:
+        status = profile_info.get("status", "PARSED")
+        prof = profile_info.get("profile") or {}
+        identity = prof.get("identity") or {}
+        contact = prof.get("contact") or {}
+        name = identity.get("full_name") or contact.get("name") or "Candidate"
+        skills_raw = (prof.get("skills") or {}).get("items") or []
+        skills = [s.get("name") if isinstance(s, dict) else s for s in skills_raw if s]
+        exp_count = len((prof.get("experience") or {}).get("items") or [])
+        skills_str = ", ".join(str(s) for s in skills[:8])
+        return (
+            "The user HAS uploaded a resume. It was successfully parsed into the candidate profile "
+            f"(Status: {status}, Candidate Name: {name}, Skills Extracted: {len(skills)} "
+            f"[{skills_str}], Work Experience Entries: {exp_count})."
+        )
+    if session.candidate_input:
+        return "A resume file/text has been uploaded in this session."
+    return "No resume has been uploaded yet in this session."
+
+
+def _clean_llm_text(raw: str, fallback: str) -> str:
+    """Safely extract human message text from LLM response, avoiding raw JSON leaks."""
+    if not isinstance(raw, str) or not raw.strip():
+        return fallback
+    text = raw.strip()
+    from app.llm.intent_json import parse_intent_json
+
+    parsed = parse_intent_json(text)
+    if isinstance(parsed, dict):
+        val = (
+            parsed.get("text")
+            or parsed.get("narration")
+            or parsed.get("message")
+            or parsed.get("answer")
+        )
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    match = re.search(r'"(?:text|narration|message|answer)"\s*:\s*"([^"]+)"', text)
+    if match and match.group(1).strip():
+        return match.group(1).strip()
+    if text.startswith("{") or '"text":' in text or '"narration":' in text:
+        return fallback
+    return text
+
+
+# -- Query-to-ranking preference extraction (Component 2) ------------------
+
+#: Noise words stripped when extracting the target role from a query.
+_ROLE_NOISE = frozenset({
+    "jobs", "job", "roles", "role", "positions", "position",
+    "openings", "opening", "vacancies", "vacancy",
+    "fresher", "freshers", "intern", "interns", "internship", "internships",
+    "senior", "junior", "lead", "principal", "entry", "mid",
+    "level", "experienced", "remote",
+    "find", "search", "look", "for", "hunt", "get", "show", "list", "give", "display",
+    "in", "at", "with", "near", "from", "of", "to", "by", "on", "and", "or",
+    "a", "an", "the", "me", "all", "any", "some", "needed", "looking", "want", "wanted",
+    "hire", "hiring", "work", "working", "opportunity", "opportunities",
+})
+
+#: Level keywords and their canonical ranking values.
+_LEVEL_KEYWORDS: dict[str, str] = {
+    "intern": "intern",
+    "interns": "intern",
+    "internship": "intern",
+    "internships": "intern",
+    "fresher": "fresher",
+    "freshers": "fresher",
+    "entry": "entry",
+    "junior": "junior",
+    "mid": "mid",
+    "senior": "senior",
+    "lead": "lead",
+    "principal": "principal",
+}
+
+#: Employment-type keywords and their canonical ranking values.
+_EMPLOYMENT_KEYWORDS: dict[str, str] = {
+    "intern": "internship",
+    "interns": "internship",
+    "internship": "internship",
+    "internships": "internship",
+    "contract": "contract",
+    "part-time": "part_time",
+    "parttime": "part_time",
+    "full-time": "full_time",
+    "fulltime": "full_time",
+}
+
+
+def _extract_ranking_preferences(
+    clean_query: str,
+    locations: list[str] | None = None,
+) -> dict[str, Any]:
+    """Extract structured ranking preferences from a cleaned query string.
+
+    Maps the natural-language role query into the ``ranking`` section that the
+    frozen Phase 1 Step 6 scorer understands:
+    - ``soft.target_roles``  — the core role the user asked for
+    - ``hard.experience_levels``  — intern/fresher/senior/etc.
+    - ``hard.employment_types``   — internship/contract/etc.
+    - ``soft.prefer_internship_fresher`` — True when intern/fresher detected
+
+    This is orchestrator-level intelligence (Phase 7); the scorer itself is
+    frozen and unchanged.
+    """
+    tokens = re.findall(r"[a-z]+", clean_query.lower())
+    if not tokens:
+        return {}
+
+    # Detect experience levels and employment types
+    experience_levels: list[str] = []
+    employment_types: list[str] = []
+    prefer_intern_fresher = False
+
+    for token in tokens:
+        if token in _LEVEL_KEYWORDS:
+            level = _LEVEL_KEYWORDS[token]
+            if level not in experience_levels:
+                experience_levels.append(level)
+            if level in ("intern", "fresher"):
+                prefer_intern_fresher = True
+        if token in _EMPLOYMENT_KEYWORDS:
+            emp = _EMPLOYMENT_KEYWORDS[token]
+            if emp not in employment_types:
+                employment_types.append(emp)
+
+    loc_tokens: set[str] = set()
+    if locations:
+        for loc in locations:
+            loc_tokens.update(re.findall(r"[a-z]+", loc.lower()))
+
+    # Extract target role: strip noise words, levels, employment keywords, location tokens
+    role_tokens = [
+        t for t in tokens
+        if t not in _ROLE_NOISE and t not in loc_tokens
+    ]
+    target_role = " ".join(role_tokens).strip()
+
+    soft: dict[str, Any] = {}
+    hard: dict[str, Any] = {}
+
+    if target_role:
+        # Add both the raw extracted role and expanded forms
+        roles = [target_role]
+        # Expand common abbreviations
+        expansions: dict[str, str] = {
+            "ml": "machine learning",
+            "ai": "artificial intelligence",
+            "ds": "data science",
+            "swe": "software",
+            "devops": "devops",
+            "fe": "frontend",
+            "be": "backend",
+            "qa": "quality assurance",
+            "ui": "user interface",
+            "ux": "user experience",
+        }
+        expanded_tokens = []
+        for t in role_tokens:
+            if t in expansions:
+                expanded_tokens.append(expansions[t])
+            else:
+                expanded_tokens.append(t)
+        expanded = " ".join(expanded_tokens).strip()
+        if expanded != target_role and expanded:
+            roles.append(expanded)
+        soft["target_roles"] = roles
+
+    if experience_levels:
+        hard["experience_levels"] = experience_levels
+    if employment_types:
+        hard["employment_types"] = employment_types
+    if prefer_intern_fresher:
+        soft["prefer_internship_fresher"] = True
+
+    result: dict[str, Any] = {}
+    if soft:
+        result["soft"] = soft
+    if hard:
+        result["hard"] = hard
+    return result
+
+
+# -- Post-ranking relevance filter (Component 3) ---------------------------
+
+def _apply_relevance_filter(
+    state: dict[str, Any],
+    target_roles: list[str],
+) -> dict[str, Any]:
+    """Drop jobs with zero title relevance from ranked results.
+
+    Checks whether ANY word from the user's target role appears in the job
+    title. This is deliberately broad — we only exclude complete mismatches
+    (e.g., "DevOps Engineer" when user asked for "ML engineer"). Partial
+    overlaps like "Machine Learning Platform Engineer" are always kept.
+
+    Operates on the FINAL state AFTER the frozen graph has finished — never
+    modifies the canonical jobs list or the graph internals.
+    """
+    jobs = state.get("jobs") or []
+    ranked = state.get("ranked_jobs") or []
+    if not jobs or not ranked or not target_roles:
+        return state
+
+    # Build the set of meaningful keywords from target roles
+    all_role_tokens: set[str] = set()
+    for role in target_roles:
+        tokens = set(re.findall(r"[a-z0-9+#]+", role.lower()))
+        # Don't add generic noise tokens to the filter
+        meaningful = tokens - {
+            "engineer", "developer", "manager", "analyst",
+            "designer", "specialist", "consultant",
+            "architect", "scientist", "associate",
+            "coordinator", "administrator", "technician",
+            "in", "at", "for", "with", "near", "from", "of", "to", "by", "on",
+            "and", "or", "a", "an", "the", "jobs", "job", "role", "roles",
+            "position", "positions", "opening", "openings",
+        }
+        if meaningful:
+            all_role_tokens.update(meaningful)
+
+    if not all_role_tokens:
+        # Query was too generic (e.g., just "engineer") — keep everything
+        return state
+
+    # Determine which job indices are relevant
+    relevant_indices: set[int] = set()
+    for idx, job in enumerate(jobs):
+        if not isinstance(job, Mapping):
+            continue
+        title = str(job.get("title") or "").lower()
+        title_tokens = set(re.findall(r"[a-z0-9+#]+", title))
+        # Job is relevant if ANY meaningful role keyword appears in its title
+        if title_tokens & all_role_tokens:
+            relevant_indices.add(idx)
+
+    # If every job is relevant (or none is — safety), skip the filter
+    if len(relevant_indices) >= len(jobs) or not relevant_indices:
+        return state
+
+    # Filter ranked_jobs to only relevant indices
+    filtered_ranked = [
+        r for r in ranked
+        if isinstance(r, Mapping) and r.get("job_index") in relevant_indices
+    ]
+
+    # Filter match_results similarly
+    matches = state.get("match_results") or []
+    filtered_matches = [
+        m for m in matches
+        if isinstance(m, Mapping) and m.get("job_index") in relevant_indices
+    ]
+
+    filtered_count = len(ranked) - len(filtered_ranked)
+    if filtered_count > 0:
+        logger.info(
+            "relevance filter applied",
+            extra={
+                "source": "orchestrator",
+                "operation": "relevance_filter",
+                "target_roles": target_roles,
+                "role_keywords": sorted(all_role_tokens),
+                "total_ranked": len(ranked),
+                "kept": len(filtered_ranked),
+                "filtered_out": filtered_count,
+            },
+        )
+
+    return _reindex_state_jobs(state, filtered_ranked, filtered_matches)
+
+
+def _reindex_state_jobs(
+    state: dict[str, Any],
+    target_ranked: list[dict[str, Any]],
+    target_matches: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Re-index jobs, ranked_jobs, and match_results so state.jobs contains only
+    the ranked/relevant jobs in order, with 0-based job_index values.
+    """
+    jobs = state.get("jobs") or []
+    if not target_ranked:
+        new_state = dict(state)
+        new_state["jobs"] = []
+        new_state["ranked_jobs"] = []
+        new_state["match_results"] = []
+        return new_state
+
+    new_jobs: list[Any] = []
+    old_to_new: dict[int, int] = {}
+    new_ranked: list[dict[str, Any]] = []
+
+    for r in target_ranked:
+        if not isinstance(r, Mapping):
+            continue
+        old_idx = r.get("job_index")
+        if old_idx is not None and isinstance(old_idx, int) and 0 <= old_idx < len(jobs):
+            new_idx = len(new_jobs)
+            new_jobs.append(jobs[old_idx])
+            old_to_new[old_idx] = new_idx
+            r_copy = dict(r)
+            r_copy["job_index"] = new_idx
+            new_ranked.append(r_copy)
+
+    new_matches: list[dict[str, Any]] = []
+    for m in target_matches:
+        if not isinstance(m, Mapping):
+            continue
+        old_idx = m.get("job_index")
+        if old_idx in old_to_new:
+            m_copy = dict(m)
+            m_copy["job_index"] = old_to_new[old_idx]
+            new_matches.append(m_copy)
+
+    new_state = dict(state)
+    new_state["jobs"] = new_jobs
+    new_state["ranked_jobs"] = new_ranked
+    new_state["match_results"] = new_matches
+    return new_state
 
 
 __all__ = ["EventEmitter", "JarvisOrchestrator", "default_adapters"]

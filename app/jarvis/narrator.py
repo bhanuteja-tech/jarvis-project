@@ -28,12 +28,33 @@ def narrate(state: Mapping[str, Any] | None) -> tuple[str, list[dict[str, Any]]]
     tailored_result = state.get("tailored_resume") or {}
     report = state.get("validation_report") or {}
 
-    lines.append(
-        f"Discovered {len(jobs)} job(s); top match score "
-        f"{matches[0]['score']:g} ({matches[0]['tier']})."
-        if matches
-        else f"Discovered {len(jobs)} job(s)."
-    )
+    errors = state.get("errors") or []
+    failed_sources = sorted({
+        error.get("source")
+        for error in errors
+        if isinstance(error, Mapping) and error.get("source")
+    })
+
+    from app.config.settings import get_settings
+    searchapi_key = get_settings().searchapi_api_key.get_secret_value().strip()
+
+    if not jobs:
+        notes = []
+        if not searchapi_key:
+            notes.append("SearchApi is unconfigured (SEARCHAPI_API_KEY is empty in .env)")
+        if failed_sources:
+            notes.append(f"source errors in ({', '.join(failed_sources)})")
+        if notes:
+            lines.append("Zero jobs returned. Note: " + "; ".join(notes) + ".")
+        else:
+            lines.append("No matching job opportunities were found for your query.")
+    else:
+        lines.append(
+            f"Discovered {len(jobs)} job(s); top match score "
+            f"{matches[0]['score']:g} ({matches[0]['tier']})."
+            if matches
+            else f"Discovered {len(jobs)} job(s)."
+        )
 
     if matches:
         lines.append("Top matches:")
@@ -78,9 +99,7 @@ def narrate(state: Mapping[str, Any] | None) -> tuple[str, list[dict[str, Any]]]
         )
         attachments.append({"kind": "validation_report", "status": overall})
 
-    errors = state.get("errors") or []
-    failed_sources = sorted({error.get("source") for error in errors})
-    if failed_sources:
+    if failed_sources and jobs:
         lines.append("Note: some steps reported errors (" + ", ".join(failed_sources) + ").")
 
     return "\n".join(lines), attachments

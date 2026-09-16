@@ -40,6 +40,7 @@ ALLOWED_ACTIONS = frozenset(
         "resume_analysis",
         "job_details",
         "cover_letter",
+        "apply_for_role",
     }
 )
 
@@ -94,14 +95,45 @@ class DisabledAssistantLlmClient:
 
 
 _SELECT_TARGET_RE = re.compile(
-    r"(?:tailor|use|pick|select)\s+(?:my\s+resume\s+for\s+"
+    r"(?:tailor|use|pick|select|apply|apply\s+to|apply\s+for)\s+(?:(?:my\s+)?resume\s+for\s+"
     r"(?:the\s+)?(?:job\s+|match\s+|position\s+)?#?|"
     r"(?:the\s+)?(?:job\s+|match\s+|position\s+)#?)?"
-    r"(first|second|third|fourth|fifth|\d{1,3})\b",
+    r"(first|second|third|fourth|fifth|this|\d{1,3})\b",
     re.IGNORECASE,
 )
-_ORDINALS = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5}
+_ORDINALS = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "this": 1}
+_APPLY_ROLE_RE = re.compile(
+    r"^(?:apply\s+for|apply\s+to|apply|tailor\s+my\s+resume\s+for|tailor\s+for)\s+(?:(?:a\s+)?(?:job|role|position)\s+(?:like|as)\s+|the\s+|a\s+|an\s+)?(.+)$",
+    re.IGNORECASE,
+)
 _IN_RE = re.compile(r"\bin\s+([A-Za-z ,]+)$", re.IGNORECASE)
+
+
+def _extract_query_and_locations(text: str) -> tuple[str, list[str]]:
+    cleaned = (text or "").strip()
+    lowered = cleaned.lower()
+
+    locations: list[str] = []
+    location_match = _IN_RE.search(cleaned)
+    query_part = cleaned
+
+    if location_match is not None:
+        raw_loc = location_match.group(1).strip()
+        locations = [part.strip() for part in raw_loc.split(",") if part.strip()]
+        query_part = cleaned[:location_match.start()].strip()
+
+    if "remote" in lowered and not any(loc.lower() == "remote" for loc in locations):
+        locations.append("Remote")
+
+    # Strip leading search verbs
+    search_verb_pat = r"^(find|search\s+for|search|look\s+for|hunt\s+for)\s+"
+    query_part = re.sub(search_verb_pat, "", query_part, flags=re.IGNORECASE).strip()
+    # Strip trailing job words if isolated
+    job_words_pat = r"\s+(jobs|roles|positions|openings|vacancies)$"
+    query_part = re.sub(job_words_pat, "", query_part, flags=re.IGNORECASE).strip()
+
+    final_query = query_part if query_part else cleaned
+    return final_query, locations
 
 
 def parse_intent(text: str) -> Plan:
@@ -112,11 +144,22 @@ def parse_intent(text: str) -> Plan:
     match = _SELECT_TARGET_RE.match(lowered)
     if match:
         raw = match.group(1)
-        number = _ORDINALS.get(raw.lower()) or int(raw)
+        number = _ORDINALS.get(raw.lower(), 1) if not raw.isdigit() else int(raw)
         return Plan(
             action="select_target",
             params={"target_job_index": number - 1},
             reply_hint=f"Re-running with target job #{number}.",
+            from_free_text=False,
+        )
+
+    role_match = _APPLY_ROLE_RE.match(lowered)
+    if role_match and not lowered.startswith(("find ", "search ")):
+        target_role = role_match.group(1).strip().strip(".!?")
+        return Plan(
+            action="apply_for_role",
+            intent="apply_for_role",
+            params={"target_role": target_role},
+            reply_hint=f"Analyzing your resume for '{target_role}' and tailoring suggestions.",
             from_free_text=False,
         )
 
@@ -127,12 +170,9 @@ def parse_intent(text: str) -> Plan:
         return Plan(action="help", from_free_text=False)
 
     if lowered.startswith(("find ", "search ")):
+        _, locations = _extract_query_and_locations(cleaned)
         params: dict[str, Any] = {"user_query": cleaned}
-        location_match = _IN_RE.search(cleaned)
-        if location_match is not None:
-            locations = [
-                part.strip() for part in location_match.group(1).split(",") if part.strip()
-            ]
+        if locations:
             params["locations"] = locations
         return Plan(
             action="run_discovery",
@@ -190,13 +230,9 @@ def classify_free_text(cleaned: str) -> Plan:
     if _SEARCH_VERB_RE.match(lowered) or any(
         cue in lowered for cue in ("internship", "job opening", "vacancy", "hiring for")
     ):
-        # Explicit enough to keep legacy discovery behaviour.
+        _, locations = _extract_query_and_locations(cleaned)
         params: dict[str, Any] = {"user_query": cleaned}
-        location_match = _IN_RE.search(cleaned)
-        if location_match is not None:
-            locations = [
-                part.strip() for part in location_match.group(1).split(",") if part.strip()
-            ]
+        if locations:
             params["locations"] = locations
         return Plan(
             action="run_discovery",

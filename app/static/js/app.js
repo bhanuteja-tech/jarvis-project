@@ -103,6 +103,8 @@ function activateTab(name) {
   }
 }
 
+let lastTargetJob = null;
+
 // ---- rendering helpers ---------------------------------------------------------------
 function refreshWorkspace() {
   const state = getState();
@@ -118,7 +120,11 @@ function refreshWorkspace() {
       : `${state.artifacts.jobs.length} opportunities`;
     renderJobCards(els.jobCards, state.artifacts.jobs, state.artifacts.matchResults, {
       onViewMatch: (index, match) => matchDrawer.open(index, match),
-      onTailor: (index) => submitUserText(`tailor job ${index + 1}`),
+      onApply: (index, job) => handleApplyJob(index, job),
+      onTailor: (index) => {
+        lastTargetJob = state.artifacts.jobs[index] || null;
+        submitUserText(`tailor job ${index + 1}`);
+      },
       onSave: (index, _job, btn) => void saveJobFromCard(index, btn),
       onAsk: (index) => askAboutJob(index),
       isSaved: (index) => state.llm.savedIndexes instanceof Set &&
@@ -129,10 +135,46 @@ function refreshWorkspace() {
   }
 
   if (state.artifacts.tailoredResume) {
-    renderTailoredResume(els.tailoredView, state.artifacts.tailoredResume);
+    renderTailoredResume(els.tailoredView, state.artifacts.tailoredResume, {
+      targetJob: lastTargetJob,
+      validationReport: state.artifacts.validationReport,
+      onConfirmApply: (job) => handleConfirmApply(job),
+    });
   }
   if (state.artifacts.validationReport) {
     renderValidation(els.validationView, state.artifacts.validationReport);
+  }
+}
+
+function handleApplyJob(index, job) {
+  lastTargetJob = job;
+  activateTab("resume");
+  addMessage("status", `Tailoring resume specifically for ${job?.company || "target job"} — ${job?.title || "role"}…`);
+  submitUserText(`tailor job ${index + 1}`);
+}
+
+async function handleConfirmApply(job) {
+  if (!job) return;
+  const sessionId = getState().session.id;
+  try {
+    // Save/update status to applied
+    const res = await fetch(`/api/jobs/saved?session_id=${encodeURIComponent(sessionId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_key: job.id || job.job_url || `${job.company}-${job.title}`,
+        title: job.title,
+        company: job.company,
+        location: job.location,
+        job_url: job.job_url,
+        status: "applied",
+      }),
+    });
+    if (res.ok) {
+      toast(`✓ Marked application as APPLIED for ${job.company || "job"}`, "ok");
+    }
+  } catch {
+    /* ignore network failure for tracker */
   }
 }
 
@@ -832,6 +874,14 @@ function handleEvent(envelope) {
     return;
   }
 
+  // Agent thinking: update the live step label with pipeline progress detail.
+  if (mapped.thinkingDetail) {
+    els.liveStepLabel.textContent = mapped.thinkingDetail;
+    els.liveStep.hidden = false;
+    if (mapped.avatar) setAvatar(mapped.avatar);
+    return;
+  }
+
   if (mapped.nodeStarted) {
     markNodeStarted(mapped.nodeStarted);
     if (mapped.avatar) setAvatar(mapped.avatar);
@@ -906,7 +956,11 @@ function handleEvent(envelope) {
 
   if (mapped.assistantMessage) {
     hideTyping(els.messages);
-    renderMessage(els.messages, "jarvis", mapped.assistantMessage.text);
+    let bubble = finalizeLiveBubble(mapped.assistantMessage.text);
+    if (!bubble) {
+      bubble = renderMessage(els.messages, "jarvis", mapped.assistantMessage.text);
+    }
+
 
     // Phase 12: cover-letter attachment -> download button
     const clAttachment = (mapped.assistantMessage.attachments || []).find(
@@ -1138,18 +1192,45 @@ function attachResultActions(snapshot) {
   els.messages.lastElementChild.appendChild(row);
 }
 
-// Real provider token streaming only; never faked by this frontend.
+// Real provider token streaming; smooth real-time single-bubble approach.
+// One persistent bubble receives incremental text; finalization replaces its
+// content with the full rich-formatted final message — no duplicate nodes,
+// no layout flicker.
 let liveBubble = null;
 let liveText = "";
+
 function appendTokenToLiveBubble(token) {
+  hideTyping(els.messages);
   if (!liveBubble || !liveBubble.isConnected) {
-    liveBubble = renderMessage(els.messages, "jarvis", "");
+    // Create one bubble that will receive all streamed tokens.
+    liveBubble = document.createElement("div");
+    liveBubble.className = "msg jarvis streaming";
+    els.messages.appendChild(liveBubble);
     liveText = "";
   }
   liveText += token;
+  // Smooth in-place update: just set textContent (no innerHTML thrashing).
   liveBubble.textContent = liveText;
-  els.messages.scrollTop = els.messages.scrollHeight;
+  requestAnimationFrame(() => {
+    els.messages.scrollTop = els.messages.scrollHeight;
+  });
 }
+
+function finalizeLiveBubble(finalText) {
+  if (liveBubble && liveBubble.isConnected) {
+    const textToRender = finalText || liveText;
+    // Replace the streaming bubble with a properly formatted message.
+    const fresh = renderMessage(els.messages, "jarvis", textToRender);
+    liveBubble.remove();
+    liveBubble = null;
+    liveText = "";
+    return fresh;
+  }
+  liveBubble = null;
+  liveText = "";
+  return null;
+}
+
 // ---- boot: route + home -------------------------------------------------------
 applyRoute();
 void loadHomeContext();

@@ -119,10 +119,19 @@ function jobCard(job, index, match, handlers) {
   const actions = document.createElement("div");
   actions.className = "job-card__actions";
 
+  // Apply & Tailor button (triggers JD-targeted tailoring and review before application)
+  const applyBtn = document.createElement("button");
+  applyBtn.type = "button";
+  applyBtn.className = "btn btn--primary";
+  applyBtn.textContent = "Apply & Tailor";
+  applyBtn.title = "Tailor resume and review application for this role";
+  applyBtn.addEventListener("click", () => handlers.onApply?.(index, job));
+  actions.appendChild(applyBtn);
+
   if (match) {
     const viewBtn = document.createElement("button");
     viewBtn.type = "button";
-    viewBtn.className = "btn btn--primary";
+    viewBtn.className = "btn";
     viewBtn.textContent = "View Match";
     viewBtn.addEventListener("click", () => handlers.onViewMatch?.(index, match));
     actions.appendChild(viewBtn);

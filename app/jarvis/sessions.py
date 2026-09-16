@@ -51,4 +51,6 @@ class InMemorySessionStore:
         return self._sessions.get(session_id)
 
 
-__all__ = ["InMemorySessionStore", "Session"]
+global_session_store = InMemorySessionStore()
+
+__all__ = ["InMemorySessionStore", "Session", "global_session_store"]

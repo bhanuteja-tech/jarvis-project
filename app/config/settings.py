@@ -54,6 +54,19 @@ class Settings(BaseSettings):
     searchapi_max_retries: int = Field(default=2, ge=0, le=10)
     searchapi_max_pages: int = Field(default=5, ge=1, le=50)
 
+    #: RapidAPI configuration (JSearch / RapidAPI job search engine)
+    rapidapi_search_url: str = "https://jsearch.p.rapidapi.com/search"
+    rapidapi_host: str = "jsearch.p.rapidapi.com"
+    rapidapi_api_key: SecretStr = SecretStr("")
+    x_rapidapi_key: SecretStr = SecretStr("")
+    rapidapi_timeout_seconds: float = Field(default=30.0, gt=0)
+    rapidapi_max_retries: int = Field(default=2, ge=0, le=10)
+    rapidapi_max_pages: int = Field(default=5, ge=1, le=50)
+
+    #: ElevenLabs TTS API Key
+    elevenlabs_api_key: SecretStr = SecretStr("")
+    eleven_labs_api_key: SecretStr = SecretStr("")
+
     career_fetch_timeout_seconds: float = Field(default=20.0, gt=0)
     career_max_attempts: int = Field(default=2, ge=1, le=10)
     career_max_bytes: int = Field(default=2_000_000, ge=10_000)

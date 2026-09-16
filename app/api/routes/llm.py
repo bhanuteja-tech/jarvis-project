@@ -95,9 +95,9 @@ async def llm_test(request: Request) -> dict[str, Any]:
 
 from app.jarvis.observability import trace_recorder  # noqa: E402
 from app.jarvis.saved import saved_job_store  # noqa: E402
-from app.jarvis.sessions import InMemorySessionStore  # noqa: E402
+from app.jarvis.sessions import global_session_store  # noqa: E402
 
-_session_store = InMemorySessionStore()
+_session_store = global_session_store
 
 
 def _session(request: Request):
@@ -156,12 +156,29 @@ async def save_job(request: Request) -> dict[str, Any]:
             break
 
     snapshot = _snapshot_from_state(artifacts or session.last_state, index)
+    if snapshot is None and isinstance(body, dict) and (body.get("job_key") or body.get("title")):
+        snapshot = {
+            "job_key": body.get("job_key") or f"{body.get('company', '')}-{body.get('title', '')}",
+            "title": body.get("title"),
+            "company": body.get("company"),
+            "location": body.get("location"),
+            "job_url": body.get("job_url"),
+            "source": body.get("source", "manual"),
+        }
     if snapshot is None:
         return {"saved": False, "reason": "job_not_found"}
     entry = saved_job_store.add(session_id, snapshot)
-    return {"saved": entry is not None, "job": entry}
+    status = body.get("status") if isinstance(body, dict) else None
+    if status and snapshot.get("job_key"):
+        saved_job_store.set_status(session_id, str(snapshot["job_key"]), str(status))
+        if entry:
+            entry["status"] = status
+    return {"saved": entry is not None or status is not None, "job": entry}
 
 
+@router.get("/api/jobs/saved")
+async def list_saved(request: Request) -> dict[str, Any]:
+    session_id, session = _session(request)
     if not session_id or session is None:
         return {"jobs": [], "attention": 0}
     jobs = saved_job_store.list(session_id)

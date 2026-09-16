@@ -343,6 +343,7 @@ class TestRouterAndDeterministicFallback:
             jarvis_llm_fallback_providers="openai",
             jarvis_llm_model="llama3.1",
             openai_api_key="openai-test-key",
+            openrouter_api_key="",
         )
         llm = routed_client(
             settings,
@@ -368,6 +369,7 @@ class TestRouterAndDeterministicFallback:
             jarvis_llm_fallback_providers="openai",
             jarvis_llm_model="llama3.1",
             openai_api_key="k",
+            openrouter_api_key="",
         )
         client = routed_client(
             settings,
