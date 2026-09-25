@@ -105,8 +105,12 @@ class OpenAICompatibleClient:
         if status_code == 429:
             raise RateLimitedError("provider rate limit reached")
         if 500 <= status_code <= 599:
-            raise ProviderHTTPError(f"provider server error ({status_code})")
-        raise ProviderHTTPError(f"unexpected provider status ({status_code})")
+            raise ProviderHTTPError(
+                f"provider server error ({status_code})", status_code=status_code
+            )
+        raise ProviderHTTPError(
+            f"unexpected provider status ({status_code})", status_code=status_code
+        )
 
     async def generate(
         self,

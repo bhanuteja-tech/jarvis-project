@@ -55,6 +55,16 @@ class RateLimitedError(LLMProviderError):
 class ProviderHTTPError(LLMProviderError):
     code = "provider_error"
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        code: str | None = None,
+    ) -> None:
+        super().__init__(message, code=code)
+        self.status_code = status_code
+
 
 class DisabledAssistantClient:
     """Default no-op client. Never performs I/O; every use raises."""

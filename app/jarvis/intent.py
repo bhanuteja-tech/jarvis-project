@@ -41,6 +41,8 @@ ALLOWED_ACTIONS = frozenset(
         "job_details",
         "cover_letter",
         "apply_for_role",
+        # Phase 8: desktop control
+        "desktop_control",
     }
 )
 
@@ -169,17 +171,53 @@ def parse_intent(text: str) -> Plan:
     if lowered in {"help", "?"}:
         return Plan(action="help", from_free_text=False)
 
-    if lowered.startswith(("find ", "search ")):
-        _, locations = _extract_query_and_locations(cleaned)
-        params: dict[str, Any] = {"user_query": cleaned}
+    # ---- Authoritative Centralized Priority Router -------------------------
+    from app.routing.router import default_router
+    from app.routing.taxonomy import Intent, is_browser_control, is_computer_control
+
+    route_res = default_router.route(cleaned)
+
+    # 1. Session control / Interrupt
+    if route_res.intent == Intent.VOICE_SESSION_STOP:
+        return Plan(action="end_session", intent="end_session", from_free_text=False)
+    if route_res.intent == Intent.INTERRUPT:
+        return Plan(action="interrupt", intent="interrupt", from_free_text=False)
+
+    # 2. Computer and Browser Control (Single & Compound Plans)
+    if is_computer_control(route_res.intent) or is_browser_control(route_res.intent):
+        return Plan(
+            action="desktop_control",
+            intent="desktop_control",
+            params={
+                "route": route_res.to_dict(),
+                "plan": route_res.plan,
+                "is_compound": route_res.is_compound,
+                "intent": str(route_res.intent),
+                "desktop_action": route_res.params.get("desktop_action") or str(route_res.intent),
+                **route_res.params,
+            },
+            from_free_text=False,
+        )
+
+    # 3. Explicit Career Job Search (Strict signals only)
+    if route_res.intent == Intent.CAREER_JOB_SEARCH:
+        _, locations = _extract_query_and_locations(route_res.normalized_text or cleaned)
+        params: dict[str, Any] = {"user_query": route_res.normalized_text or cleaned}
         if locations:
             params["locations"] = locations
+        is_conversational_free_text = bool(
+            re.match(
+                r"^(?:can\s+you|could\s+you|would\s+you|please|i'm\s+looking|i\s+want|help\s+me)\b",
+                cleaned,
+                re.IGNORECASE,
+            )
+        )
         return Plan(
             action="run_discovery",
             intent="job_search",
             params=params,
             reply_hint="Starting job discovery.",
-            from_free_text=False,
+            from_free_text=is_conversational_free_text,
         )
 
     # Non-command free text: classify BEFORE defaulting to a job search.
@@ -191,8 +229,23 @@ def classify_free_text(cleaned: str) -> Plan:
 
     Career workflows run ONLY on explicit career phrasing. Everything
     ambiguous routes to conversation (never the expensive graph).
+    Desktop control commands are explicit OS actions (open app, volume,
+    screenshot, etc.) and take priority over career advice.
     """
     lowered = cleaned.lower()
+
+    # ---- Phase 8: desktop control (explicit OS actions, check early) ------
+    from app.desktop.parser import parse_desktop_command
+
+    desktop_parsed = parse_desktop_command(cleaned)
+    if desktop_parsed is not None:
+        desktop_action, desktop_params = desktop_parsed
+        return Plan(
+            action="desktop_control",
+            intent="desktop_control",
+            params={"desktop_action": str(desktop_action), **desktop_params},
+            from_free_text=False,
+        )
 
     if _COVER_LETTER_RE.search(lowered):
         index = _extract_job_number(cleaned)
@@ -225,21 +278,6 @@ def classify_free_text(cleaned: str) -> Plan:
             action="general_question",
             intent="general_question",
             params={"user_query": cleaned},
-        )
-
-    if _SEARCH_VERB_RE.match(lowered) or any(
-        cue in lowered for cue in ("internship", "job opening", "vacancy", "hiring for")
-    ):
-        _, locations = _extract_query_and_locations(cleaned)
-        params: dict[str, Any] = {"user_query": cleaned}
-        if locations:
-            params["locations"] = locations
-        return Plan(
-            action="run_discovery",
-            intent="job_search",
-            params=params,
-            reply_hint="Starting job discovery.",
-            from_free_text=False,
         )
 
     if _CAREER_ADVICE_RE.search(lowered):
@@ -388,10 +426,20 @@ async def refine_intent_with_llm(text: str, llm: Any) -> Plan | None:
 
 GRAMMAR_HELP = (
     "You can say:\n"
+    "**Career:**\n"
     "- find machine learning engineer in berlin\n"
     "- tailor job 1   (or: use match 1)\n"
     "- status\n"
-    "- help"
+    "- analyze my resume\n"
+    "\n**Desktop Control:**\n"
+    "- open chrome / launch notepad / start calculator\n"
+    "- go to github.com / open youtube.com\n"
+    "- search for python tutorials\n"
+    "- close chrome / take a screenshot\n"
+    "- system info / volume up / volume down / mute\n"
+    "- what apps are running\n"
+    "- type hello world\n"
+    "\n- help"
 )
 
 

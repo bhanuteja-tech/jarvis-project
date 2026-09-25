@@ -1,6 +1,20 @@
 import { create } from 'zustand'
 
-export type AiCoreState = 'idle' | 'listening' | 'thinking' | 'searching' | 'analyzing' | 'speaking' | 'error'
+export type AiCoreState =
+  | 'idle'
+  | 'listening'
+  | 'transcribing'
+  | 'routing'
+  | 'executing'
+  | 'observing'
+  | 'thinking'
+  | 'searching'
+  | 'analyzing'
+  | 'speaking'
+  | 'interrupted'
+  | 'ending'
+  | 'ended'
+  | 'error'
 
 export interface ActivityItem {
   id: string
@@ -67,6 +81,63 @@ export interface SavedJob {
   tier?: string
 }
 
+export type AppMode = 'career' | 'computer'
+
+export interface ComputerStateInfo {
+  isRunning: boolean
+  planDescription: string
+  steps: string[]
+  currentStepIdx: number
+  currentStepDescription: string
+  lastVerified: boolean | null
+  lastResponse: string
+  needsConfirm: boolean
+  stepResults: Array<{
+    step_id: string
+    description: string
+    verified: boolean | null
+    reason?: string
+    confidence?: number
+    tool?: string
+  }>
+  // Advanced debug telemetry
+  intent?: string | null
+  entities?: any | null
+  target?: string | null
+  browser?: string | null
+  observation?: string | null
+  verification?: any | null
+  taskId?: string | null
+  generation?: number
+  activeApplication?: string | null
+  currentDirectory?: string | null
+  activeWindow?: string | null
+  currentUrl?: string | null
+  isExplorerActive?: boolean
+}
+
+export interface ComputerContextInfo {
+  site: string | null
+  domain: string | null
+  page: string | null
+  channel: string | null
+  playlist: string | null
+  course: string | null
+  video: string | null
+  videoUrl: string | null
+  activeBrowser: string | null
+  activeApp: string | null
+  activeWindow: string | null
+  currentUrl: string | null
+  windowTitle: string | null
+  webSite: string | null
+  webChannel: string | null
+  webVideo: string | null
+  currentList: Array<{ ordinal?: number; type?: string; title?: string; name?: string; url?: string }>
+  ordinalBasis: string | null
+  currentDirectory: string | null
+}
+
 interface JarvisState {
   // Workspace
   activeWorkspace: string
@@ -131,6 +202,23 @@ interface JarvisState {
   // Session
   sessionId: string
   setSessionId: (id: string) => void
+
+  // Voice Session
+  voiceSessionActive: boolean
+  setVoiceSessionActive: (active: boolean) => void
+
+  // App Mode (career vs computer control)
+  appMode: AppMode
+  setAppMode: (mode: AppMode) => void
+
+  // Computer Agent state
+  computerState: ComputerStateInfo
+  setComputerState: (state: Partial<ComputerStateInfo>) => void
+  resetComputerState: () => void
+
+  // Computer context
+  computerContext: ComputerContextInfo
+  setComputerContext: (ctx: Partial<ComputerContextInfo>) => void
 }
 
 export const useStore = create<JarvisState>((set) => ({
@@ -189,4 +277,63 @@ export const useStore = create<JarvisState>((set) => ({
 
   sessionId: typeof window !== 'undefined' ? (crypto.randomUUID?.() || `s-${Date.now()}`) : 'session-default',
   setSessionId: (sessionId) => set({ sessionId }),
+
+  voiceSessionActive: false,
+  setVoiceSessionActive: (voiceSessionActive) => set({ voiceSessionActive }),
+
+  appMode: 'career',
+  setAppMode: (appMode) => set({ appMode }),
+
+  computerState: {
+    isRunning: false,
+    planDescription: '',
+    steps: [],
+    currentStepIdx: -1,
+    currentStepDescription: '',
+    lastVerified: null,
+    lastResponse: '',
+    needsConfirm: false,
+    stepResults: [],
+  },
+  setComputerState: (updates) => set((s) => ({
+    computerState: { ...s.computerState, ...updates },
+  })),
+  resetComputerState: () => set({
+    computerState: {
+      isRunning: false,
+      planDescription: '',
+      steps: [],
+      currentStepIdx: -1,
+      currentStepDescription: '',
+      lastVerified: null,
+      lastResponse: '',
+      needsConfirm: false,
+      stepResults: [],
+    }
+  }),
+
+  computerContext: {
+    site: null,
+    domain: null,
+    page: null,
+    channel: null,
+    playlist: null,
+    course: null,
+    video: null,
+    videoUrl: null,
+    activeBrowser: null,
+    activeApp: null,
+    activeWindow: null,
+    currentUrl: null,
+    windowTitle: null,
+    webSite: null,
+    webChannel: null,
+    webVideo: null,
+    currentList: [],
+    ordinalBasis: null,
+    currentDirectory: null,
+  },
+  setComputerContext: (updates) => set((s) => ({
+    computerContext: { ...s.computerContext, ...updates },
+  })),
 }))

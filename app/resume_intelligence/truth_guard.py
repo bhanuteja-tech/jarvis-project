@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+
 from app.dedup.normalize import informative_tokens
 from app.jdunderstanding.taxonomy import find_skill_hits
 from app.resume_intelligence.models import FactCheckResult, StructuredResume

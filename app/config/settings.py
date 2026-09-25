@@ -125,6 +125,11 @@ class Settings(BaseSettings):
     #: (non-browser clients) is allowed for tests and tooling.
     jarvis_ws_allow_origins: str = ""
 
+    # --- Phase 8: Desktop control -------------------------------------------
+    #: Master switch for local desktop control features (open apps, URLs, etc.)
+    #: No API keys required; all operations are local stdlib-only.
+    desktop_control_enabled: bool = True
+
     # --- Phase 10: LLM provider layer (Jarvis assistant surface ONLY) --------
     #: Provider selection. Unknown/missing config disables the layer.
     #: Supported: ollama | deepseek | moonshot | gemini | anthropic | openai | openrouter
@@ -166,6 +171,12 @@ class Settings(BaseSettings):
     openrouter_api_key: SecretStr = SecretStr("")
     #: OPTIONAL bearer token protecting a tunnel-exposed Ollama server.
     ollama_api_key: SecretStr = SecretStr("")
+
+    # --- Laya System-1 Fast Decision Engine -----------------------------------
+    laya_enabled: bool = True
+    laya_confidence_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    laya_device: str = "auto"
+    laya_model_repo: str = "convaiinnovations/laya"
 
     # --- Additional providers (Phase 10 extension) ---------------------------
     #: DeepSeek — low-cost cloud provider, OpenAI-compatible wire format.

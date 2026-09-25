@@ -110,24 +110,46 @@ def _origin_allowed(websocket: WebSocket) -> bool:
     return origin_host in allowed
 
 
-@router.websocket("/ws/jarvis")
-async def ws_jarvis(websocket: WebSocket) -> None:
-    if not _origin_allowed(websocket):
-        # Reject cross-origin handshakes before joining a session.
-        await websocket.accept()
-        await websocket.close(code=1008)
-        logger.warning(
-            "ws handshake rejected: cross-origin",
-            extra={"source": "jarvis"},
-        )
-        return
+async def _handle_ws_connection(websocket: WebSocket, *, forced_domain: str | None = None) -> None:
+    """Shared WebSocket connection handler.
+
+    Args:
+        websocket: The accepted WebSocket connection.
+        forced_domain: When set (``"computer"`` or ``"career"``), the session's
+            domain is locked to this value and cannot be changed by messages.
+            ``None`` means legacy behaviour — the domain may be set via the
+            ``mode`` query param or per-message ``mode`` field.
+    """
+    from app.jarvis.sessions import DomainViolation
 
     await websocket.accept()
-    session = _session_store.get_or_create(websocket.query_params.get("session_id"))
+
+    sid = websocket.query_params.get("session_id")
+    if forced_domain in ("career", "computer"):
+        # Domain-exclusive endpoint: lock the session to the forced domain.
+        session = _session_store.get_or_create(sid, domain=forced_domain, lock=True)  # type: ignore[call-arg]
+    else:
+        # Legacy shared endpoint: honour the mode query param (unlocked).
+        session = _session_store.get_or_create(sid)
+        ws_mode = websocket.query_params.get("mode")
+        if ws_mode in ("career", "computer"):
+            session.mode = ws_mode
+
     orchestrator = _get_orchestrator()
 
     async def send(envelope: dict[str, Any]) -> None:
-        await websocket.send_json(envelope)
+        try:
+            await websocket.send_json(envelope)
+        except TypeError:
+            import json
+
+            def _fallback_encoder(obj: Any) -> Any:
+                if hasattr(obj, "to_dict") and callable(obj.to_dict):
+                    return obj.to_dict()
+                return str(obj)
+
+            safe_text = json.dumps(envelope, default=_fallback_encoder, ensure_ascii=False)
+            await websocket.send_text(safe_text)
         if (
             envelope.get("type") == "completed"
             and session.last_state is not None
@@ -143,6 +165,7 @@ async def ws_jarvis(websocket: WebSocket) -> None:
                     "tailored_target_index": tailored_target_index(state),
                     "validation_status": validation_status(state),
                 })
+
     if session.last_state:
         from datetime import UTC, datetime
         artifacts = build_artifacts(session.last_state)
@@ -161,7 +184,30 @@ async def ws_jarvis(websocket: WebSocket) -> None:
     try:
         while True:
             message = await websocket.receive_json()
-            await orchestrator.handle_message(session, message, send=send)
+            try:
+                await orchestrator.handle_message(session, message, send=send)
+            except DomainViolation as exc:
+                # Hard domain enforcement: send a typed error event and
+                # continue the loop so the connection stays alive.
+                from datetime import UTC, datetime
+                logger.warning(
+                    "domain violation blocked: %s (session=%s domain=%s)",
+                    exc.action,
+                    session.session_id,
+                    session.domain,
+                    extra={"source": "jarvis"},
+                )
+                await send({
+                    "type": "error",
+                    "seq": 0,
+                    "ts": datetime.now(UTC).isoformat(),
+                    "run_id": None,
+                    "data": {
+                        "code": "domain_violation",
+                        "message": str(exc),
+                        "session_domain": session.domain,
+                    },
+                })
     except WebSocketDisconnect:
         return
     except Exception:
@@ -170,6 +216,59 @@ async def ws_jarvis(websocket: WebSocket) -> None:
             await websocket.close(code=1011)
         except Exception:
             pass
+
+
+@router.websocket("/ws/computer")
+async def ws_computer(websocket: WebSocket) -> None:
+    """Domain-exclusive WebSocket for Computer Control (/app/computer).
+
+    Sessions created here are PERMANENTLY locked to domain="computer".
+    Career intelligence tools (run_discovery, resume analysis, etc.) are
+    rejected at the orchestrator level.  This is the code-level enforcement
+    point — not a regex, not an LLM instruction, not a keyword check.
+    """
+    if not _origin_allowed(websocket):
+        await websocket.accept()
+        await websocket.close(code=1008)
+        logger.warning("ws/computer: cross-origin rejected", extra={"source": "jarvis"})
+        return
+    await _handle_ws_connection(websocket, forced_domain="computer")
+
+
+@router.websocket("/ws/career")
+async def ws_career(websocket: WebSocket) -> None:
+    """Domain-exclusive WebSocket for Career Intelligence (/app/career).
+
+    Sessions created here are PERMANENTLY locked to domain="career".
+    Computer-control tools (open_application, browser_navigate, etc.) are
+    rejected at the orchestrator level.  This is the code-level enforcement
+    point — not a regex, not an LLM instruction, not a keyword check.
+    """
+    if not _origin_allowed(websocket):
+        await websocket.accept()
+        await websocket.close(code=1008)
+        logger.warning("ws/career: cross-origin rejected", extra={"source": "jarvis"})
+        return
+    await _handle_ws_connection(websocket, forced_domain="career")
+
+
+@router.websocket("/ws/jarvis")
+async def ws_jarvis(websocket: WebSocket) -> None:
+    """Legacy shared WebSocket endpoint (backward compatibility).
+
+    New clients should prefer /ws/computer or /ws/career for strict
+    domain isolation.  This endpoint honours the ``mode`` query parameter
+    and per-message ``mode`` field as before.
+    """
+    if not _origin_allowed(websocket):
+        await websocket.accept()
+        await websocket.close(code=1008)
+        logger.warning(
+            "ws handshake rejected: cross-origin",
+            extra={"source": "jarvis"},
+        )
+        return
+    await _handle_ws_connection(websocket, forced_domain=None)
 
 
 def build_artifacts(state: dict[str, Any]) -> dict[str, Any]:
@@ -879,7 +978,9 @@ async def resume_copilot_chat_stream(request: Request) -> Any:
     """Stream real-time AI Resume Copilot advice with instant insertion suggestions."""
     import asyncio
     import json
+
     from starlette.responses import StreamingResponse
+
     from app.llm import create_assistant_llm
 
     settings = get_settings()
@@ -999,6 +1100,7 @@ async def resume_copilot_chat_stream(request: Request) -> Any:
 async def resume_ats_audit(request: Request) -> dict[str, Any]:
     """Dual-mode ATS scoring: General audit (no JD) or Targeted Job match (with JD)."""
     import re
+
     from app.jdunderstanding.taxonomy import find_skill_hits
 
     try:

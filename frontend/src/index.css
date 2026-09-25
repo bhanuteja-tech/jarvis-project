@@ -375,5 +375,47 @@
   background: transparent !important;
 }
 
+/* ========================= PUBLIC WEBSITE UTILITIES ========================= */
 
+.tech-grid-bg {
+  background-image: 
+    linear-gradient(to right, rgba(59, 130, 246, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(59, 130, 246, 0.05) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
 
+.tech-dot-bg {
+  background-image: radial-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.text-gradient-cyan {
+  background: linear-gradient(135deg, #ffffff 0%, #a5f3fc 50%, #38bdf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.text-gradient-blue {
+  background: linear-gradient(135deg, #60a5fa 0%, #818cf8 50%, #c084fc 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.border-glow-blue {
+  box-shadow: 0 0 25px -5px rgba(59, 130, 246, 0.25);
+}
+
+.border-glow-cyan {
+  box-shadow: 0 0 25px -5px rgba(6, 182, 212, 0.25);
+}
+
+@keyframes waveform {
+  0%, 100% { height: 6px; }
+  50% { height: 28px; }
+}
+
+.animate-waveform-1 { animation: waveform 1.2s ease-in-out infinite; }
+.animate-waveform-2 { animation: waveform 0.9s ease-in-out infinite 0.2s; }
+.animate-waveform-3 { animation: waveform 1.4s ease-in-out infinite 0.4s; }
+.animate-waveform-4 { animation: waveform 1.0s ease-in-out infinite 0.1s; }
+.animate-waveform-5 { animation: waveform 1.3s ease-in-out infinite 0.3s; }

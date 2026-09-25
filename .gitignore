@@ -41,3 +41,7 @@ node_modules/
 frontend/node_modules/
 .npm/
 
+# --- Local personal resume files ---
+bhanu_teja_resume.txt
+
+

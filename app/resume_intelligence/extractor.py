@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 from collections.abc import Mapping
+from typing import Any
 
 from app.resume_intelligence.models import (
     EducationEntry,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+
 from app.jdunderstanding.taxonomy import find_skill_hits
 from app.resume_intelligence.models import StructuredResume
 

@@ -1,31 +1,82 @@
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { useStore, AiCoreState } from '../store/useStore'
+import { useStore } from '../store/useStore'
+import { continuousVoiceController, VoiceSessionState } from '../utils/ContinuousVoiceController'
 
-const ORB_CLASSES: Record<AiCoreState, string> = {
+const ORB_CLASSES: Record<string, string> = {
   idle: 'ai-orb',
   listening: 'ai-orb',
+  transcribing: 'ai-orb-analyzing',
+  routing: 'ai-orb',
+  executing: 'ai-orb-searching',
+  observing: 'ai-orb-analyzing',
   thinking: 'ai-orb',
   searching: 'ai-orb-searching',
   analyzing: 'ai-orb-analyzing',
   speaking: 'ai-orb',
+  interrupted: 'ai-orb-error',
+  ending: 'ai-orb-analyzing',
+  ended: 'ai-orb',
   error: 'ai-orb-error',
 }
 
-const STATUS_COLORS: Record<AiCoreState, string> = {
+const STATUS_COLORS: Record<string, string> = {
   idle: 'text-cyan-400',
-  listening: 'text-red-400',
+  listening: 'text-amber-400',
+  transcribing: 'text-blue-400',
+  routing: 'text-violet-400',
+  executing: 'text-cyan-400',
+  observing: 'text-purple-400',
   thinking: 'text-blue-400',
   searching: 'text-cyan-400',
   analyzing: 'text-violet-400',
-  speaking: 'text-blue-400',
+  speaking: 'text-emerald-400',
+  interrupted: 'text-orange-400',
+  ending: 'text-rose-400',
+  ended: 'text-zinc-400',
   error: 'text-red-400',
 }
 
+const VOICE_LABELS: Record<VoiceSessionState, string> = {
+  IDLE: 'READY',
+  LISTENING: 'LISTENING',
+  TRANSCRIBING: 'UNDERSTANDING',
+  ROUTING: 'THINKING',
+  EXECUTING: 'EXECUTING',
+  OBSERVING: 'OBSERVING',
+  SPEAKING: 'SPEAKING',
+  INTERRUPTED: 'INTERRUPTED',
+  ENDING: 'ENDING',
+  ENDED: 'SESSION ENDED',
+  ERROR: 'ERROR',
+}
+
 export function AICore() {
-  const { aiCoreState, aiCoreLabel } = useStore()
-  const isActive = aiCoreState !== 'idle'
-  const orbClass = ORB_CLASSES[aiCoreState] || 'ai-orb'
-  const statusColor = STATUS_COLORS[aiCoreState] || 'text-cyan-400'
+  const { aiCoreState: storeState, aiCoreLabel: storeLabel } = useStore()
+  const [voiceState, setVoiceState] = useState<VoiceSessionState>('IDLE')
+  const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false)
+
+  useEffect(() => {
+    const unsub = continuousVoiceController.subscribe((state) => {
+      setVoiceState(state)
+      const debug = continuousVoiceController.getDebugData()
+      setIsVoiceActive(debug.isActive || state !== 'IDLE')
+    })
+    return unsub
+  }, [])
+
+  // In voice mode, the voice controller is authoritative
+  const effectiveState = isVoiceActive ? voiceState.toLowerCase() : storeState
+  const effectiveLabel = isVoiceActive
+    ? `● ${VOICE_LABELS[voiceState] || voiceState}`
+    : storeLabel
+
+  const isActive = isVoiceActive
+    ? voiceState !== 'IDLE' && voiceState !== 'ENDED'
+    : storeState !== 'idle'
+
+  const orbClass = ORB_CLASSES[effectiveState] || 'ai-orb'
+  const statusColor = STATUS_COLORS[effectiveState] || 'text-cyan-400'
 
   return (
     <div className="relative flex items-center justify-center select-none">
@@ -142,10 +193,10 @@ export function AICore() {
         className="absolute -bottom-20 left-1/2 -translate-x-1/2 text-center"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        key={aiCoreLabel}
+        key={effectiveLabel}
       >
         <p className={`text-xs font-semibold tracking-[0.2em] uppercase ${statusColor}`}>
-          {aiCoreLabel}
+          {effectiveLabel}
         </p>
         {isActive && (
           <motion.div

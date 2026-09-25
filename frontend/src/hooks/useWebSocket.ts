@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useStore } from '../store/useStore'
+import { continuousVoiceController } from '../utils/ContinuousVoiceController'
 
 export interface Message {
   id: string
@@ -34,12 +35,14 @@ function nextId(): string {
   return `msg-${++msgIdCounter}-${Date.now()}`
 }
 
-export function useWebSocket() {
+export function useWebSocket(wsPath?: string) {
   const [messages, setMessages] = useState<Message[]>([])
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const wsRef = useRef<WebSocket | null>(null)
   const sessionIdRef = useRef(crypto.randomUUID?.() || `session-${Date.now()}-${Math.random()}`)
   const streamingRef = useRef<string | null>(null)
+  // Capture the wsPath in a ref so reconnects use the same endpoint.
+  const wsPathRef = useRef(wsPath || '/ws/jarvis')
 
 
 
@@ -47,7 +50,13 @@ export function useWebSocket() {
     const sessionId = sessionIdRef.current
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
-    const ws = new WebSocket(`${protocol}//${host}/ws/jarvis?session_id=${sessionId}`)
+    // Use the domain-specific endpoint if provided; fall back to the legacy
+    // shared endpoint.  The mode query param is included for the legacy path.
+    const endpoint = wsPathRef.current
+    const isLegacy = endpoint === '/ws/jarvis'
+    const mode = useStore.getState().appMode
+    const modeParam = isLegacy ? `&mode=${mode}` : ''
+    const ws = new WebSocket(`${protocol}//${host}${endpoint}?session_id=${sessionId}${modeParam}`)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -140,8 +149,21 @@ export function useWebSocket() {
           }
         }
 
-        store.setAiCoreState('idle')
-        store.setAiCoreLabel('Ready')
+        // Voice response handling
+        const isVoice = !!data.is_voice || continuousVoiceController.getDebugData().isActive
+        if (isVoice) {
+          continuousVoiceController.handleAssistantResponse({
+            text: displayText,
+            generation: data.generation,
+            isAcknowledgment: data.is_acknowledgment,
+            isTermination: data.is_termination,
+          })
+        }
+
+        if (!continuousVoiceController.getDebugData().isActive) {
+          store.setAiCoreState('idle')
+          store.setAiCoreLabel('Ready')
+        }
         break
       }
 
@@ -168,6 +190,24 @@ export function useWebSocket() {
         }
         store.setAiCoreState('thinking')
         store.setAiCoreLabel('Responding...')
+        break
+      }
+
+      case 'domain_violation': {
+        // The session's domain does not support this action.
+        // Show a helpful redirect message rather than a generic error.
+        const sessionDomain: string = data.session_domain || 'current'
+        const otherDomain = sessionDomain === 'computer' ? 'career' : 'computer'
+        const targetUrl = `/app/${otherDomain}`
+        const domainLabel = otherDomain === 'career' ? 'Career Intelligence' : 'Computer Control'
+        setMessages(prev => [...prev, {
+          id: nextId(),
+          role: 'error' as const,
+          text: `That action belongs to ${domainLabel}. Navigate to ${targetUrl} to use it.`,
+          timestamp: Date.now(),
+        }])
+        store.setIsProcessing(false)
+        // Don't set AI Core to error — this is an informational boundary message.
         break
       }
 
@@ -314,8 +354,11 @@ export function useWebSocket() {
       case 'agent_completed': {
         store.setIsProcessing(false)
         store.setProcessingStage('')
-        store.setAiCoreState('idle')
-        store.setAiCoreLabel('Ready')
+        if (!continuousVoiceController.getDebugData().isActive) {
+          store.setAiCoreState('idle')
+          store.setAiCoreLabel('Ready')
+        }
+        continuousVoiceController.handleAgentCompleted()
         // Mark any remaining active activities as completed
         const acts = useStore.getState().activities
         acts.forEach(a => {
@@ -330,8 +373,11 @@ export function useWebSocket() {
       case 'run_cancelled': {
         store.setIsProcessing(false)
         store.setProcessingStage('')
-        store.setAiCoreState('idle')
-        store.setAiCoreLabel('Ready')
+        if (!continuousVoiceController.getDebugData().isActive) {
+          store.setAiCoreState('idle')
+          store.setAiCoreLabel('Ready')
+        }
+        continuousVoiceController.handleAgentCompleted()
         if (data.message) {
           setMessages(prev => [...prev, {
             id: nextId(),
@@ -363,6 +409,225 @@ export function useWebSocket() {
         break
       }
 
+      case 'desktop_action_result': {
+        const emoji = data.success ? '✅' : '❌'
+        const actionLabel = (data.action || 'desktop_action').replace(/_/g, ' ')
+        store.addActivity({
+          id: `desktop-${envelope.seq}`,
+          label: `${emoji} Desktop: ${actionLabel}`,
+          status: data.success ? 'completed' : 'skipped',
+          timestamp: Date.now(),
+        })
+        const details = data.details || {}
+        const compState = details.computer_state || {}
+        continuousVoiceController.updateDiagnosticData({
+          execution: `${data.action || 'action'}`,
+          verification: details.verification || (data.success ? 'SUCCESS' : 'FAILED'),
+          activeApplication: compState.active_application || details.application,
+          currentDirectory: compState.current_directory || details.directory,
+          taskId: data.task_id,
+        })
+        break
+      }
+
+      // -----------------------------------------------------------------------
+      // Phase 8+ Computer Agent events
+      // -----------------------------------------------------------------------
+
+      case 'computer_plan_start': {
+        store.resetComputerState()
+        store.setComputerState({ isRunning: true })
+        store.setAiCoreState('thinking')
+        store.setAiCoreLabel('Planning task...')
+        break
+      }
+
+      case 'computer_plan_ready': {
+        store.setComputerState({
+          planDescription: data.description || '',
+          steps: data.steps || [],
+          currentStepIdx: 0,
+        })
+        store.setAiCoreState('executing')
+        store.setAiCoreLabel(`Executing ${data.step_count || 1} step plan`)
+        store.addActivity({
+          id: `plan-${envelope.seq}`,
+          label: `📋 Plan: ${data.description || 'computer control'}`,
+          status: 'active',
+          timestamp: Date.now(),
+        })
+        break
+      }
+
+      case 'computer_step_start':
+      case 'computer_step_started': {
+        const stepIdx = data.step_idx ?? 0
+        const totalSteps = data.total_steps ?? 1
+        store.setComputerState({
+          currentStepIdx: stepIdx,
+          currentStepDescription: data.description || '',
+        })
+        store.setAiCoreLabel(`Step ${stepIdx + 1}/${totalSteps}: ${data.description || ''}`)
+        store.addActivity({
+          id: `step-${data.step_id || envelope.seq}`,
+          label: `⚙️ ${data.description || data.tool || 'executing'}`,
+          status: 'active',
+          timestamp: Date.now(),
+        })
+        continuousVoiceController.updateDiagnosticData({
+          currentStep: `Step ${stepIdx + 1}/${totalSteps}`,
+          execution: `${data.tool || 'executing'}`,
+          currentTask: `${data.description || data.tool || 'executing'}`,
+          routerType: 'AUTONOMOUS_AGENT',
+          intent: data.tool || 'computer_control',
+        })
+        break
+      }
+
+      case 'computer_step_done':
+      case 'computer_step_verified': {
+        const prevResults = useStore.getState().computerState.stepResults
+        store.setComputerState({
+          stepResults: [...prevResults, {
+            step_id: data.step_id || '',
+            description: data.description || '',
+            verified: data.verified ?? true,
+            reason: data.reason,
+            confidence: data.confidence,
+          }],
+        })
+        const activities = useStore.getState().activities
+        const act = activities.find(a => a.id === `step-${data.step_id || ''}` && a.status === 'active')
+        if (act) store.updateActivity(act.id, { status: 'completed', label: `✅ ${act.label.replace('⚙️ ', '')}` })
+        continuousVoiceController.updateDiagnosticData({
+          verification: (data.verified ?? true) ? 'SUCCESS' : 'FAILED',
+          confidence: data.confidence,
+        })
+        break
+      }
+
+      case 'computer_step_failed': {
+        const prevResults = useStore.getState().computerState.stepResults
+        store.setComputerState({
+          stepResults: [...prevResults, {
+            step_id: data.step_id || '',
+            description: data.description || '',
+            verified: false,
+            reason: data.reason,
+          }],
+        })
+        const activities = useStore.getState().activities
+        const act = activities.find(a => a.id === `step-${data.step_id || ''}` && a.status === 'active')
+        if (act) store.updateActivity(act.id, { status: 'error', label: `❌ ${act.label.replace('⚙️ ', '')}` })
+        continuousVoiceController.updateDiagnosticData({
+          verification: 'FAILED',
+          confidence: data.confidence || 0.0,
+        })
+        break
+      }
+
+      case 'computer_state_update': {
+        const app = data.active_application || ''
+        const isExplorer = app && (
+          app.toLowerCase().includes('explorer') ||
+          app.toLowerCase().includes('desktop')
+        )
+        store.setComputerState({
+          activeApplication: data.active_application,
+          currentDirectory: data.current_directory,
+          activeWindow: data.active_window_title,
+          currentUrl: data.current_url,
+          isExplorerActive: isExplorer,
+          intent: data.current_intent || data.last_intent || null,
+          target: data.last_target || null,
+          browser: isExplorer ? 'None' : (data.browser_name || data.browser || null),
+          observation: data.last_observation || null,
+          verification: data.last_verification || null,
+          taskId: data.current_task_id || null,
+        })
+        continuousVoiceController.updateDiagnosticData({
+          activeApplication: data.active_application,
+          currentDirectory: data.current_directory,
+        })
+        store.setComputerContext({
+          activeApp: data.active_application || null,
+          activeWindow: data.active_window_title || null,
+          activeBrowser: isExplorer ? 'None' : (data.browser_name || data.browser || null),
+          currentUrl: isExplorer ? null : (data.active_page_url || data.current_url || null),
+          currentDirectory: data.current_directory || null,
+          ...(isExplorer ? {
+            site: null,
+            domain: null,
+            page: null,
+            channel: null,
+            playlist: null,
+            course: null,
+            video: null,
+            videoUrl: null,
+            webSite: null,
+            webChannel: null,
+            webVideo: null,
+          } : {})
+        })
+        break
+      }
+
+      case 'computer_context_update': {
+        store.setComputerContext({
+          site: data.site || null,
+          domain: data.domain || null,
+          page: data.page || null,
+          channel: data.channel || null,
+          playlist: data.playlist || null,
+          course: data.course || null,
+          video: data.video || null,
+          videoUrl: data.video_url || null,
+          webSite: data.site ? data.site.toUpperCase() : null,
+          webChannel: data.channel || null,
+          webVideo: data.video || null,
+          currentList: data.current_list || [],
+          ordinalBasis: data.ordinal_basis || null,
+        })
+        break
+      }
+
+      case 'computer_needs_confirm':
+      case 'confirmation_required': {
+        store.setComputerState({ needsConfirm: true })
+        store.addActivity({
+          id: `confirm-${envelope.seq}`,
+          label: `⚠️ Needs confirmation: ${data.description || ''}`,
+          status: 'active',
+          timestamp: Date.now(),
+        })
+        break
+      }
+
+      case 'computer_response': {
+        store.setComputerState({
+          isRunning: false,
+          lastVerified: data.verified ?? null,
+          lastResponse: data.text || '',
+          needsConfirm: data.needs_confirm ?? false,
+        })
+        if (!data.needs_confirm) {
+          store.setAiCoreState('idle')
+          store.setAiCoreLabel('Ready')
+        }
+        break
+      }
+
+      case 'computer_error': {
+        store.setComputerState({ isRunning: false, lastVerified: false })
+        store.setAiCoreState('error')
+        store.setAiCoreLabel('Error')
+        setTimeout(() => {
+          store.setAiCoreState('idle')
+          store.setAiCoreLabel('Ready')
+        }, 3000)
+        break
+      }
+
       default:
         // Unknown event types are ignored per protocol
         break
@@ -387,13 +652,46 @@ export function useWebSocket() {
         text,
         timestamp: Date.now(),
       }])
-      // Backend expects {type, text} at the top level (not nested in data)
+      // Backend expects {type, text, mode} at the top level (not nested in data)
+      const mode = useStore.getState().appMode
       wsRef.current.send(JSON.stringify({
         type: 'chat',
         text,
+        mode,
       }))
     }
   }, [])
+
+  const sendVoiceTurn = useCallback((text: string, generation: number) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setMessages(prev => [...prev, {
+        id: nextId(),
+        role: 'user' as const,
+        text,
+        timestamp: Date.now(),
+      }])
+      const mode = useStore.getState().appMode
+      wsRef.current.send(JSON.stringify({
+        type: 'voice_turn',
+        text,
+        generation,
+        mode,
+      }))
+    }
+  }, [])
+
+  const sendVoiceBargeIn = useCallback((generation: number) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'voice_barge_in',
+        generation,
+      }))
+    }
+  }, [])
+
+  useEffect(() => {
+    continuousVoiceController.setSendFunctions(sendVoiceTurn, sendVoiceBargeIn)
+  }, [sendVoiceTurn, sendVoiceBargeIn])
 
   const sendResumeFile = useCallback((file: File) => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) {
@@ -480,6 +778,8 @@ export function useWebSocket() {
   return {
     messages,
     sendMessage,
+    sendVoiceTurn,
+    sendVoiceBargeIn,
     sendResumeFile,
     sendJobQuestion,
     sendTailorRequest,

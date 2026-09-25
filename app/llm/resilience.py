@@ -60,8 +60,13 @@ def _is_retryable_error(error: LLMProviderError) -> bool:
     if isinstance(error, (LLMTimeoutError, RateLimitedError)):
         return True
     if isinstance(error, ProviderHTTPError):
-        # ProviderHTTPError with 5xx status codes are retryable
-        # This is heuristic; providers should set status_code on their errors
+        # ProviderHTTPError with 5xx status codes are retryable; 4xx errors are not.
+        status = getattr(error, "status_code", None)
+        if status is not None:
+            return 500 <= status <= 599
+        err_msg = str(error).lower()
+        if any(f"({code})" in err_msg for code in range(400, 500)):
+            return False
         return True
     # Never retry auth failures, invalid model, or malformed responses
     return False

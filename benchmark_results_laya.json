@@ -1,0 +1,131 @@
+{
+  "benchmark_timestamp": 1790357148.7529287,
+  "total_cases": 10,
+  "accurate_cases": 10,
+  "accuracy_pct": 100.0,
+  "avg_laya_latency_ms": 0.31,
+  "escalation_count": 0,
+  "escalation_rate_pct": 0.0,
+  "results": [
+    {
+      "case_id": "1_filesystem_intent",
+      "description": "Filesystem domain intent classification",
+      "qtype": "choice",
+      "decision": "filesystem",
+      "expected": "filesystem",
+      "confidence": 0.95,
+      "accurate": true,
+      "laya_latency_ms": 0.73,
+      "llm_route_tier": "LOCAL_FAST",
+      "llm_model": "llama3.2:3b"
+    },
+    {
+      "case_id": "2_browser_intent",
+      "description": "Browser domain intent classification",
+      "qtype": "choice",
+      "decision": "browser",
+      "expected": "browser",
+      "confidence": 0.95,
+      "accurate": true,
+      "laya_latency_ms": 0.43,
+      "llm_route_tier": "LOCAL_FAST",
+      "llm_model": "llama3.2:3b"
+    },
+    {
+      "case_id": "3_application_intent",
+      "description": "Application launch intent",
+      "qtype": "choice",
+      "decision": "application",
+      "expected": "application",
+      "confidence": 0.95,
+      "accurate": true,
+      "laya_latency_ms": 0.29,
+      "llm_route_tier": "LOCAL_FAST",
+      "llm_model": "llama3.2:3b"
+    },
+    {
+      "case_id": "4_pronoun_it",
+      "description": "Contextual pronoun 'it' resolution",
+      "qtype": "choice",
+      "decision": "C:/Users/Music",
+      "expected": "C:/Users/Music",
+      "confidence": 0.5,
+      "accurate": true,
+      "laya_latency_ms": 0.18,
+      "llm_route_tier": "LOCAL_FAST",
+      "llm_model": "llama3.2:3b"
+    },
+    {
+      "case_id": "5_pronoun_those",
+      "description": "Contextual pronoun 'those' resolution",
+      "qtype": "choice",
+      "decision": "previous directory listing",
+      "expected": "previous directory listing",
+      "confidence": 0.5,
+      "accurate": true,
+      "laya_latency_ms": 0.15,
+      "llm_route_tier": "LOCAL_FAST",
+      "llm_model": "llama3.2:3b"
+    },
+    {
+      "case_id": "6_ordinal_third_one",
+      "description": "Ordinal reference resolution",
+      "qtype": "choice",
+      "decision": "file_c.zip",
+      "expected": "file_c.zip",
+      "confidence": 0.96,
+      "accurate": true,
+      "laya_latency_ms": 0.22,
+      "llm_route_tier": "LOCAL_FAST",
+      "llm_model": "llama3.2:3b"
+    },
+    {
+      "case_id": "7_ambiguity_detection",
+      "description": "Ambiguity gate on vague utterance",
+      "qtype": "noul",
+      "decision": "True",
+      "expected": "True",
+      "confidence": 0.92,
+      "accurate": true,
+      "laya_latency_ms": 0.18,
+      "llm_route_tier": "LOCAL_FAST",
+      "llm_model": "llama3.2:3b"
+    },
+    {
+      "case_id": "8_simple_tool_choice",
+      "description": "Tool shortlist candidate selection",
+      "qtype": "choice",
+      "decision": "count_directory_items",
+      "expected": "count_directory_items",
+      "confidence": 0.5,
+      "accurate": true,
+      "laya_latency_ms": 0.42,
+      "llm_route_tier": "LOCAL_FAST",
+      "llm_model": "llama3.2:3b"
+    },
+    {
+      "case_id": "9_semantic_verification",
+      "description": "Verification of observed state against user goal",
+      "qtype": "noul",
+      "decision": "True",
+      "expected": "True",
+      "confidence": 0.92,
+      "accurate": true,
+      "laya_latency_ms": 0.31,
+      "llm_route_tier": "LOCAL_FAST",
+      "llm_model": "llama3.2:3b"
+    },
+    {
+      "case_id": "10_whatsapp_recipient",
+      "description": "Messaging recipient selection",
+      "qtype": "choice",
+      "decision": "Lohit",
+      "expected": "Lohit",
+      "confidence": 0.95,
+      "accurate": true,
+      "laya_latency_ms": 0.22,
+      "llm_route_tier": "LOCAL_FAST",
+      "llm_model": "llama3.2:3b"
+    }
+  ]
+}

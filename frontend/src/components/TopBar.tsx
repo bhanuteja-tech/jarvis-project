@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Activity, Settings, X, Cpu, Wifi, WifiOff } from 'lucide-react'
+import { Activity, Settings, X, Cpu, Wifi, WifiOff, Monitor, Briefcase } from 'lucide-react'
 import { useStore } from '../store/useStore'
 
 interface TopBarProps {
@@ -19,9 +20,16 @@ interface ProviderInfo {
 }
 
 export function TopBar({ connectionStatus, sessionId }: TopBarProps) {
-  const { settingsOpen, setSettingsOpen } = useStore()
+  const { settingsOpen, setSettingsOpen, appMode, setAppMode } = useStore()
+  const navigate = useNavigate()
   const [providers, setProviders] = useState<ProviderInfo[]>([])
   const [llmEnabled, setLlmEnabled] = useState(false)
+
+  const handleModeSwitch = (mode: 'career' | 'computer') => {
+    setAppMode(mode)
+    if (mode === 'computer') navigate('/app/computer')
+    else navigate('/app/career')
+  }
 
   const statusConfig = {
     connected: { color: 'text-emerald-400', dot: 'bg-emerald-400', label: 'Online' },
@@ -56,18 +64,58 @@ export function TopBar({ connectionStatus, sessionId }: TopBarProps) {
     <>
       <div className="h-14 glass-strong border-b border-jarvis-border/30 flex items-center justify-between px-5 z-30 relative">
         {/* Logo */}
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+        <Link to="/" className="flex items-center gap-3 group hover:opacity-90 transition-opacity" title="Back to JARVIS Public Website">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-transform">
             <Activity className="text-white" size={16} />
           </div>
           <div>
-            <h1 className="text-sm font-bold text-white tracking-wide">JARVIS</h1>
-            <p className="text-[10px] text-jarvis-muted tracking-wider uppercase">Career Intelligence</p>
+            <h1 className="text-sm font-bold text-white tracking-wide flex items-center gap-1.5">
+              JARVIS
+              <span className={`text-[9px] font-normal px-1.5 py-0.5 rounded border ${
+                appMode === 'computer'
+                  ? 'bg-violet-500/10 text-violet-400 border-violet-500/20'
+                  : 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+              }`}>
+                {appMode === 'computer' ? 'COMPUTER' : 'CAREER'}
+              </span>
+            </h1>
+            <p className={`text-[10px] tracking-wider uppercase font-medium ${
+              appMode === 'computer' ? 'text-violet-400/90' : 'text-blue-400/90'
+            }`}>
+              {appMode === 'computer' ? 'Computer Control' : 'Career Intelligence'}
+            </p>
           </div>
-        </div>
+        </Link>
 
-        {/* Center status */}
+        {/* Center: mode switcher + status */}
         <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-4">
+          {/* Mode Switcher */}
+          <div className="flex items-center gap-1 bg-jarvis-surface/60 border border-jarvis-border/30 rounded-lg p-0.5">
+            <button
+              id="mode-computer"
+              onClick={() => handleModeSwitch('computer')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
+                appMode === 'computer'
+                  ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30 shadow-sm'
+                  : 'text-jarvis-muted hover:text-white'
+              }`}
+            >
+              <Monitor size={12} />
+              Computer Control
+            </button>
+            <button
+              id="mode-career"
+              onClick={() => handleModeSwitch('career')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
+                appMode === 'career'
+                  ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30 shadow-sm'
+                  : 'text-jarvis-muted hover:text-white'
+              }`}
+            >
+              <Briefcase size={12} />
+              Career Intelligence
+            </button>
+          </div>
           {/* Connection */}
           <div className="flex items-center gap-2">
             {connectionStatus === 'connected'
@@ -93,6 +141,13 @@ export function TopBar({ connectionStatus, sessionId }: TopBarProps) {
 
         {/* Right controls */}
         <div className="flex items-center gap-2">
+          <Link
+            to="/"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-jarvis-muted hover:text-white bg-jarvis-surface/40 hover:bg-jarvis-surface/80 border border-jarvis-border/30 transition-all"
+            title="Visit public product overview"
+          >
+            <span>Overview</span>
+          </Link>
           <button
             onClick={() => setSettingsOpen(!settingsOpen)}
             className={`p-2 rounded-lg transition-all ${

@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send, Mic, MicOff, Paperclip, Volume2, VolumeX } from 'lucide-react'
+import { Send, Mic, MicOff, Paperclip, Volume2, VolumeX, Square } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import type { Message } from '../hooks/useWebSocket'
 import { speakText, stopSpeaking } from '../utils/speech'
+import { continuousVoiceController, VoiceSessionState } from '../utils/ContinuousVoiceController'
 
 interface ConversationPanelProps {
   messages: Message[]
@@ -12,10 +13,15 @@ interface ConversationPanelProps {
 }
 
 const QUICK_ACTIONS = [
-  'Apply for ML Engineer Intern',
+  'Open GitHub',
+  'Open YouTube',
+  'Open Browser',
   'Find ML jobs in Bangalore',
+  'Apply for ML Engineer Intern',
   'Analyze my resume',
   'Career advice',
+  'Screenshot',
+  'System info',
 ]
 
 const ACCEPTED_TYPES = [
@@ -26,18 +32,92 @@ const ACCEPTED_TYPES = [
 ]
 const ACCEPTED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md']
 
+function CredentialCard({
+  service,
+  field,
+  onSubmit,
+  onCancel,
+}: {
+  service: string
+  field: string
+  onSubmit: (val: string) => void
+  onCancel: () => void
+}) {
+  const [val, setVal] = useState('')
+  const serviceTitle = service ? service.charAt(0).toUpperCase() + service.slice(1) : 'Service'
+
+  return (
+    <div className="mt-3 p-3.5 rounded-xl bg-gradient-to-r from-blue-950/60 to-purple-950/60 border border-blue-500/40 space-y-2.5">
+      <div className="flex items-center justify-between text-xs font-semibold text-blue-300">
+        <div className="flex items-center gap-1.5">
+          <span>🔐</span>
+          <span>{serviceTitle} Credential Required</span>
+        </div>
+        <span className="text-[10px] text-jarvis-muted uppercase tracking-wider">{field}</span>
+      </div>
+      <p className="text-[11px] text-jarvis-light/80 leading-relaxed">
+        Enter your {serviceTitle} {field} to save it in your local Credential Vault and open your account.
+      </p>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && val.trim()) {
+              e.preventDefault()
+              onSubmit(val.trim())
+            }
+          }}
+          placeholder={`e.g. ${service === 'github' ? 'bhanuteja-tech' : 'your-handle'}`}
+          className="flex-1 bg-jarvis-surface/80 border border-blue-400/30 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-jarvis-muted/50 focus:outline-none focus:border-blue-400"
+          autoFocus
+        />
+        <button
+          type="button"
+          onClick={() => {
+            if (val.trim()) onSubmit(val.trim())
+          }}
+          disabled={!val.trim()}
+          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium disabled:opacity-40 transition-all cursor-pointer"
+        >
+          Save & Open
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-2.5 py-1.5 rounded-lg bg-jarvis-surface/60 hover:bg-jarvis-surface text-jarvis-muted hover:text-white text-xs transition-all cursor-pointer"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function ConversationPanel({ messages, onSendMessage, onResumeUpload }: ConversationPanelProps) {
   const [inputText, setInputText] = useState('')
-  const [isListening, setIsListening] = useState(false)
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [voiceState, setVoiceState] = useState<VoiceSessionState>('IDLE')
+  const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false)
+  const [currentVoiceTranscript, setCurrentVoiceTranscript] = useState<string>('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const recognitionRef = useRef<any>(null)
   const { isProcessing, resumeFileName } = useStore()
 
-  const handleSpeak = (msgId: string, text: string) => {
+  useEffect(() => {
+    const unsub = continuousVoiceController.subscribe((st) => {
+      setVoiceState(st)
+      const dbg = continuousVoiceController.getDebugData()
+      setIsVoiceActive(dbg.isActive)
+      setCurrentVoiceTranscript(dbg.currentTranscript || dbg.interimTranscript)
+    })
+    return unsub
+  }, [])
+
+  const handleSpeak = useCallback((msgId: string, text: string) => {
     if (speakingMsgId === msgId) {
       stopSpeaking()
       setSpeakingMsgId(null)
@@ -63,7 +143,7 @@ export function ConversationPanel({ messages, onSendMessage, onResumeUpload }: C
     if (!started) {
       alert('Text-to-speech is not supported or failed in this browser.')
     }
-  }
+  }, [speakingMsgId])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -113,72 +193,18 @@ export function ConversationPanel({ messages, onSendMessage, onResumeUpload }: C
     setIsDragOver(false)
   }, [])
 
-  // Voice input via SpeechRecognition API
-  const toggleListening = useCallback(() => {
-    const SpeechRecognition = typeof window !== 'undefined' && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
-
-    if (!SpeechRecognition) {
-      alert('Speech recognition is not supported in this browser environment. Please use Chrome, Edge, or an HTTPS connection.')
-      return
+  // Authoritative Voice Session Control via ContinuousVoiceController
+  const toggleVoiceSession = useCallback(async () => {
+    if (isVoiceActive) {
+      continuousVoiceController.stopSession()
+    } else {
+      const ok = await continuousVoiceController.startSession()
+      if (!ok) {
+        const err = continuousVoiceController.getDebugData().errorMessage
+        alert(err || 'Failed to start continuous voice session.')
+      }
     }
-
-    if (isListening) {
-      recognitionRef.current?.stop()
-      setIsListening(false)
-      useStore.getState().setAiCoreState('idle')
-      useStore.getState().setAiCoreLabel('Ready')
-      return
-    }
-
-    try {
-      const recognition = new SpeechRecognition()
-      recognition.continuous = false
-      recognition.interimResults = true
-      recognition.lang = 'en-US'
-
-      recognition.onstart = () => {
-        setIsListening(true)
-        useStore.getState().setAiCoreState('listening')
-        useStore.getState().setAiCoreLabel('Listening...')
-      }
-
-      recognition.onresult = (event: any) => {
-        let finalTranscript = ''
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript
-          } else {
-            setInputText(event.results[i][0].transcript)
-          }
-        }
-        if (finalTranscript.trim()) {
-          setInputText(finalTranscript.trim())
-          onSendMessage(finalTranscript.trim())
-          setInputText('')
-        }
-      }
-
-      recognition.onerror = (event: any) => {
-        console.warn('Speech recognition error:', event.error)
-        setIsListening(false)
-        useStore.getState().setAiCoreState('idle')
-        useStore.getState().setAiCoreLabel('Ready')
-      }
-
-      recognition.onend = () => {
-        setIsListening(false)
-        useStore.getState().setAiCoreState('idle')
-        useStore.getState().setAiCoreLabel('Ready')
-      }
-
-      recognitionRef.current = recognition
-      recognition.start()
-    } catch (err) {
-      console.error('Speech recognition failed to start:', err)
-      setIsListening(false)
-      useStore.getState().setAiCoreState('idle')
-    }
-  }, [isListening, onSendMessage])
+  }, [isVoiceActive])
 
   const renderMessage = (message: Message) => {
     if (message.role === 'status') {
@@ -261,6 +287,17 @@ export function ConversationPanel({ messages, onSendMessage, onResumeUpload }: C
                     <span>{att.label || 'Open in PDF Studio'}</span>
                   </button>
                 </div>
+              )
+            }
+            if (att.kind === 'credential_prompt') {
+              return (
+                <CredentialCard
+                  key={i}
+                  service={att.service || 'service'}
+                  field={att.field || 'username'}
+                  onSubmit={(val) => onSendMessage(val)}
+                  onCancel={() => onSendMessage('cancel')}
+                />
               )
             }
             return null
@@ -354,6 +391,47 @@ export function ConversationPanel({ messages, onSendMessage, onResumeUpload }: C
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Active Voice Session Status Bar */}
+      {isVoiceActive && (
+        <div className="mx-3 mb-2 p-2.5 rounded-xl bg-gradient-to-r from-cyan-950/80 to-blue-950/80 border border-cyan-500/40 flex items-center justify-between shadow-lg shadow-cyan-950/30">
+          <div className="flex items-center gap-2.5 overflow-hidden">
+            <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-500" />
+            </span>
+            <div className="overflow-hidden">
+              <div className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                <span>● {voiceState}</span>
+                <span className="text-[10px] font-normal text-cyan-400/70">Continuous Voice Loop</span>
+              </div>
+              {currentVoiceTranscript && (
+                <div className="text-[11px] text-emerald-300 font-mono italic truncate max-w-xs">
+                  "{currentVoiceTranscript}"
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {voiceState === 'SPEAKING' && (
+              <button
+                type="button"
+                onClick={() => continuousVoiceController.bargeIn()}
+                className="px-2 py-1 rounded bg-amber-600/80 hover:bg-amber-500 text-white text-[10px] font-semibold transition-all cursor-pointer shadow"
+              >
+                Interrupt
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => continuousVoiceController.stopSession()}
+              className="px-2 py-1 rounded bg-red-600/80 hover:bg-red-500 text-white text-[10px] font-semibold transition-all cursor-pointer"
+            >
+              End Voice
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Input Area */}
       <div className="p-3 border-t border-jarvis-border/30">
         <div className="flex items-center gap-2">
@@ -377,18 +455,18 @@ export function ConversationPanel({ messages, onSendMessage, onResumeUpload }: C
             }}
           />
 
-          {/* Voice */}
+          {/* Continuous Voice Session Toggle */}
           <button
             type="button"
-            onClick={toggleListening}
-            className={`p-2 rounded-lg transition-all ${
-              isListening
-                ? 'bg-red-500/20 text-red-400 animate-pulse'
-                : 'bg-jarvis-surface/50 text-jarvis-muted hover:text-jarvis-accent hover:bg-jarvis-surface'
+            onClick={toggleVoiceSession}
+            className={`p-2 rounded-lg transition-all cursor-pointer ${
+              isVoiceActive
+                ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse'
+                : 'bg-jarvis-surface/50 text-jarvis-muted hover:text-cyan-400 hover:bg-jarvis-surface'
             }`}
-            title={isListening ? 'Stop listening' : 'Voice input'}
+            title={isVoiceActive ? 'Stop Continuous Voice Session' : 'Start Continuous Voice Session'}
           >
-            {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+            {isVoiceActive ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
 
           {/* Text Input */}
@@ -406,7 +484,7 @@ export function ConversationPanel({ messages, onSendMessage, onResumeUpload }: C
           <button
             onClick={handleSend}
             disabled={!inputText.trim()}
-            className="p-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 text-white hover:from-blue-500 hover:to-violet-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-lg shadow-blue-500/20"
+            className="p-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 text-white hover:from-blue-500 hover:to-violet-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-lg shadow-blue-500/20 cursor-pointer"
             title="Send message"
           >
             <Send size={16} />
@@ -415,14 +493,36 @@ export function ConversationPanel({ messages, onSendMessage, onResumeUpload }: C
 
         {/* Quick Actions */}
         <div className="mt-2.5 flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
+          {/* Quick Voice Session Action Button */}
+          <button
+            type="button"
+            onClick={toggleVoiceSession}
+            className={`px-3 py-1.5 text-[11px] font-semibold rounded-full border transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              isVoiceActive
+                ? 'bg-red-500/20 text-red-300 border-red-500/40 hover:bg-red-500/30'
+                : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/30'
+            }`}
+          >
+            {isVoiceActive ? (
+              <>
+                <Square size={12} className="text-red-400" />
+                STOP VOICE SESSION
+              </>
+            ) : (
+              <>
+                <Mic size={12} className="text-cyan-400" />
+                START VOICE SESSION
+              </>
+            )}
+          </button>
+
           {QUICK_ACTIONS.map((action) => (
             <button
               key={action}
               onClick={() => {
-                setInputText(action)
-                inputRef.current?.focus()
+                onSendMessage(action)
               }}
-              className="px-3 py-1.5 text-[11px] bg-jarvis-surface/40 border border-jarvis-border/30 rounded-full text-jarvis-muted hover:text-jarvis-accent hover:border-jarvis-accent/30 transition-all whitespace-nowrap"
+              className="px-3 py-1.5 text-[11px] bg-jarvis-surface/40 border border-jarvis-border/30 rounded-full text-jarvis-muted hover:text-jarvis-accent hover:border-jarvis-accent/30 transition-all whitespace-nowrap cursor-pointer"
             >
               {action}
             </button>

@@ -326,6 +326,9 @@ class JarvisOrchestrator:
         emitter: EventEmitter,
         run_id: str,
         raw_text: str,
+        *,
+        is_voice: bool = False,
+        generation: int | None = None,
     ) -> None:
         """Phase 12: casual chat / general Q&A / career advice / job details /
         cover letter / resume analysis — everything that must NOT run the
@@ -504,7 +507,10 @@ class JarvisOrchestrator:
             )
             attachments = []
 
-        await self._speak(emitter, run_id, reply, attachments=attachments)
+        await self._speak(
+            emitter, run_id, reply, attachments=attachments,
+            is_voice=is_voice, generation=generation,
+        )
         await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
 
     async def _handle_resume_analysis(
@@ -578,7 +584,8 @@ class JarvisOrchestrator:
         target_role: str,
         llm: Any = None,
     ) -> None:
-        """Handle role application request: analyze resume against role, suggest standout changes, and invite to PDF Studio."""
+        """Handle role application request: analyze resume against role, suggest
+        standout changes, and invite to PDF Studio."""
         from pathlib import Path
 
         # 1. Fetch candidate resume text & skills
@@ -599,16 +606,44 @@ class JarvisOrchestrator:
         # 2. Formulate structured guidance
         response_lines = [
             f"🎯 **Target Role Analysis: {clean_role}**\n",
-            "I've evaluated your resume against current hiring benchmarks and ATS requirements for this position:\n",
+            (
+                "I've evaluated your resume against current hiring benchmarks "
+                "and ATS requirements for this position:\n"
+            ),
             "### ✅ Strong Alignments in Your Resume:",
-            "• **Core AI/ML Stack**: Proven foundation in Python, SQL, LangGraph-based agentic workflows, and FAISS vector retrieval.",
-            "• **End-to-End Applications**: Demonstrable production architectures including the AI Data Analyst Agent and News Research Assistant.",
-            "• **Data Depth**: Experience conducting EDA across 270k+ records and deploying on Streamlit Community Cloud.\n",
+            (
+                "• **Core AI/ML Stack**: Proven foundation in Python, SQL, "
+                "LangGraph-based agentic workflows, and FAISS vector retrieval."
+            ),
+            (
+                "• **End-to-End Applications**: Demonstrable production architectures "
+                "including the AI Data Analyst Agent and News Research Assistant."
+            ),
+            (
+                "• **Data Depth**: Experience conducting EDA across 270k+ records "
+                "and deploying on Streamlit Community Cloud.\n"
+            ),
             "### 🚀 Key Recommendations to Make Your Resume Stand Out:",
-            f"1. **Summary Alignment**: Tailor your headline and summary specifically for **{clean_role}**, highlighting production deployment and low-latency LLM/RAG systems.",
-            "2. **Add Core ATS Keywords**: Ensure **PyTorch**, **Docker**, **MLflow**, and **Model Evaluation Metrics** are prominently categorized under Technical Skills.",
-            "3. **STAR Bullet Quantification**: Highlight exact latency reductions (e.g. 35%+), query throughput, and inference efficiency across your projects.\n",
-            "👉 **Next Step**: Click below to open **PDF Studio** where you can use the AI Copilot to polish each section, make every bullet ATS-friendly, and verify your real-time ATS match score.",
+            (
+                f"1. **Summary Alignment**: Tailor your headline and summary specifically for "
+                f"**{clean_role}**, highlighting production deployment and low-latency "
+                "LLM/RAG systems."
+            ),
+            (
+                "2. **Add Core ATS Keywords**: Ensure **PyTorch**, **Docker**, "
+                "**MLflow**, and **Model Evaluation Metrics** are prominently "
+                "categorized under Technical Skills."
+            ),
+            (
+                "3. **STAR Bullet Quantification**: Highlight exact latency "
+                "reductions (e.g. 35%+), query throughput, and inference "
+                "efficiency across your projects.\n"
+            ),
+            (
+                "👉 **Next Step**: Click below to open **PDF Studio** where you can use the AI "
+                "Copilot to polish each section, make every bullet ATS-friendly, and verify your "
+                "real-time ATS match score."
+            ),
         ]
         reply = "\n".join(response_lines)
 
@@ -673,15 +708,60 @@ class JarvisOrchestrator:
         emitter = EventEmitter(send)
         message_type = str(message.get("type") or "chat")
 
-        if message_type == "cancel":
+        msg_mode = message.get("mode")
+        if msg_mode in ("career", "computer"):
+            session.mode = msg_mode
+        effective_mode = getattr(session, "mode", "career")
+
+        if message_type in ("cancel", "voice_barge_in"):
+            logger.info("RECEIVED CANCELLATION / BARGE-IN: %s", message_type)
+            barge_gen = message.get("generation")
+            if barge_gen is not None:
+                from app.agent.task_manager import default_task_manager
+                default_task_manager.invalidate_generation(barge_gen)
             await self._cancel(emitter)
             return
 
         if message_type == "resume_upload":
+            if effective_mode == "computer":
+                self._run_counter += 1
+                run_id = (
+                    f"run_{session.session_id[:8]}_{self._run_counter:04d}_"
+                    f"{time.time_ns()}"
+                )
+                await emitter.emit(
+                    ev.EventType.AGENT_STARTED, run_id=run_id, action="mode_boundary"
+                )
+                await self._speak(
+                    emitter,
+                    run_id,
+                    (
+                        "Resume analysis and tailoring are only available on the "
+                        "Career page (/app/career)."
+                    ),
+                )
+                await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
+                return
             await self._handle_resume_upload(session, message, emitter)
             return
 
         if message_type == "job_question":
+            if effective_mode == "computer":
+                self._run_counter += 1
+                run_id = (
+                    f"run_{session.session_id[:8]}_{self._run_counter:04d}_"
+                    f"{time.time_ns()}"
+                )
+                await emitter.emit(
+                    ev.EventType.AGENT_STARTED, run_id=run_id, action="mode_boundary"
+                )
+                await self._speak(
+                    emitter,
+                    run_id,
+                    "Job questions are only available on the Career page (/app/career).",
+                )
+                await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
+                return
             # Ask-JARVIS-about-this-job: grounded Q&A over session state.
             index = message.get("job_index")
             question = str(message.get("question") or "").strip()
@@ -714,12 +794,281 @@ class JarvisOrchestrator:
             )
             return
 
-        if message_type == "chat":
+        if message_type in ("chat", "voice_turn"):
+            is_voice = (message_type == "voice_turn")
+            generation = message.get("generation")
             text = message.get("text")
             if not isinstance(text, str) or not text.strip():
                 await emitter.emit(ev.EventType.ERROR, message="empty message")
                 return
+
+            if is_voice:
+                logger.info("VOICE TURN RECEIVED: %r (generation=%s)", text, generation)
+                # Check for explicit session termination commands
+                cleaned_lower = re.sub(r"[^\w\s]", "", text.strip().lower())
+                TERMINATION_PHRASES = {
+                    "bye jarvis", "goodbye jarvis", "bye", "goodbye",
+                    "stop listening", "end session", "terminate session",
+                    "exit session", "quit session"
+                }
+                if cleaned_lower in TERMINATION_PHRASES:
+                    self._run_counter += 1
+                    run_id = (
+                        f"run_{session.session_id[:8]}_{self._run_counter:04d}_"
+                        f"{time.time_ns()}"
+                    )
+                    await emitter.emit(
+                        ev.EventType.AGENT_STARTED, run_id=run_id, action="end_session"
+                    )
+                    await self._speak(
+                        emitter, run_id, "Goodbye. Voice session ended.",
+                        is_voice=True, generation=generation, is_termination=True
+                    )
+                    await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
+                    return
+
+            # Check if session is waiting for a credential response
+            pending = getattr(session, "pending_prompt", None)
+            if pending and pending.get("type") == "await_credential":
+                raw_lower = text.strip().lower()
+                if raw_lower in {"cancel", "stop", "never mind", "nevermind", "abort", "no"}:
+                    session.pending_prompt = None
+                    had_active = self._current_task is not None and not self._current_task.done()
+                    await self._cancel(emitter, quiet=not had_active)
+                    self._run_counter += 1
+                    run_id = (
+                        f"run_{session.session_id[:8]}_{self._run_counter:04d}_"
+                        f"{time.time_ns()}"
+                    )
+                    await emitter.emit(
+                        ev.EventType.AGENT_STARTED,
+                        run_id=run_id,
+                        action="desktop_control",
+                        params={"cancelled": True},
+                    )
+                    await self._speak(emitter, run_id, "Cancelled credential request.")
+                    await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
+                    return
+
+                from app.desktop.agent_harness import default_harness
+
+                had_active = self._current_task is not None and not self._current_task.done()
+                await self._cancel(emitter, quiet=not had_active)
+
+                self._run_counter += 1
+                run_id = (
+                    f"run_{session.session_id[:8]}_{self._run_counter:04d}_"
+                    f"{time.time_ns()}"
+                )
+                await emitter.emit(
+                    ev.EventType.AGENT_STARTED,
+                    run_id=run_id,
+                    action="desktop_control",
+                    params={"credential_response": True},
+                )
+                harness_res = default_harness.handle_credential_response(
+                    text, session.pending_prompt, session=session
+                )
+                await emitter.emit(
+                    ev.EventType.DESKTOP_ACTION_RESULT,
+                    run_id=run_id,
+                    **harness_res.to_dict(),
+                )
+                await self._speak(emitter, run_id, harness_res.message)
+                await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
+                return
+
+            from app.agent.task_manager import default_task_manager
+            from app.routing.router import default_router
+
+            b_ctx = getattr(session, "browser_context", None)
+            route_check = default_router.route(text, context=b_ctx)
+            if route_check.is_correction:
+                logger.info("CORRECTION DETECTED: %s", text)
+                default_task_manager.invalidate_generation(default_task_manager.current_generation)
+                default_task_manager.next_generation()
+                had_active = self._current_task is not None and not self._current_task.done()
+                await self._cancel(emitter, quiet=not had_active)
+
             plan = parse_intent(text)
+
+            # ---- Domain enforcement layer (orchestrator) -----------------
+            # Enforcement layers:
+            #   1. Frontend route (/app/computer vs /app/career)
+            #   2. WebSocket endpoint (/ws/computer vs /ws/career)
+            #   3. Session domain lock (session.lock_domain())
+            #   4. HERE: orchestrator assert_tool_allowed → DomainViolation
+            #   5. Tool registry (DomainBoundRegistry)
+            #   6. Individual tool execution (future)
+            #
+            # NOTE: Career actions sent to a computer-mode session are NOT
+            # raised as DomainViolation here.  They are handled by the existing
+            # soft-redirect path at "Decision 1 & 2" below, which returns a
+            # helpful assistant message pointing to /app/career.
+            # DomainViolation is reserved for computer-control actions arriving
+            # in a career-domain session (no soft handler exists for that path).
+            _career_actions_with_soft_block = {
+                "run_discovery", "select_target", "cover_letter",
+                "resume_analysis", "job_details", "career_advice",
+                "apply_for_role", "resume_upload", "job_question",
+                "get_results", "casual_chat", "general_question", "job_search",
+            }
+            _skip_domain_check = (
+                plan.action in {"end_session", "interrupt"}
+                or (session.domain == "computer" and plan.action in _career_actions_with_soft_block)
+            )
+            if not _skip_domain_check:
+                try:
+                    session.assert_tool_allowed(plan.action)
+                except Exception as _dv:  # noqa: BLE001
+                    from app.jarvis.sessions import DomainViolation as _DV
+                    if isinstance(_dv, _DV):
+                        raise  # Let the WS handler send the domain_violation event
+
+
+            if plan.action == "end_session":
+                self._run_counter += 1
+                run_id = (
+                    f"run_{session.session_id[:8]}_{self._run_counter:04d}_"
+                    f"{time.time_ns()}"
+                )
+                await emitter.emit(
+                    ev.EventType.AGENT_STARTED, run_id=run_id, action="end_session"
+                )
+                await self._speak(
+                    emitter, run_id, "Goodbye. Voice session ended.",
+                    is_voice=is_voice, generation=generation, is_termination=True
+                )
+                await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
+                return
+
+            if plan.action == "interrupt":
+                had_active = self._current_task is not None and not self._current_task.done()
+                await self._cancel(emitter, quiet=not had_active)
+                default_task_manager.invalidate_generation(default_task_manager.current_generation)
+                await emitter.emit(
+                    ev.EventType.RUN_CANCELLED,
+                    code="interrupted",
+                    message="Action stopped.",
+                )
+                return
+
+            # Decision 1 & 2: Dedicated Computer Control Mode (/app/computer)
+            if effective_mode == "computer":
+                career_actions = {
+                    "run_discovery",
+                    "select_target",
+                    "cover_letter",
+                    "resume_analysis",
+                    "job_details",
+                    "career_advice",
+                    "apply_for_role",
+                }
+                from app.routing.taxonomy import Intent
+                if plan.action in career_actions or route_check.intent == Intent.CAREER_JOB_SEARCH:
+                    self._run_counter += 1
+                    run_id = (
+                        f"run_{session.session_id[:8]}_{self._run_counter:04d}_"
+                        f"{time.time_ns()}"
+                    )
+                    await emitter.emit(
+                        ev.EventType.AGENT_STARTED, run_id=run_id, action="mode_boundary"
+                    )
+                    await self._speak(
+                        emitter,
+                        run_id,
+                        (
+                            "Job discovery and career workflows are only available on the "
+                            "Career page (/app/career). In Computer Control mode, you can "
+                            "control apps, browsers, and desktop tasks."
+                        ),
+                        is_voice=is_voice,
+                        generation=generation,
+                    )
+                    await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
+                    return
+
+                if plan.action == "help":
+                    self._run_counter += 1
+                    run_id = (
+                        f"run_{session.session_id[:8]}_{self._run_counter:04d}_"
+                        f"{time.time_ns()}"
+                    )
+                    await emitter.emit(
+                        ev.EventType.AGENT_STARTED, run_id=run_id, action="help"
+                    )
+                    help_text = (
+                        "Computer Control Commands:\n"
+                        "• Open apps: 'Open Chrome', 'Open Edge', 'Open VS Code', 'Open WhatsApp'\n"
+                        "• Browsing: 'Open YouTube in Edge', 'Search LangGraph on YouTube'\n"
+                        "• Navigation: 'Open CampusX', 'Open the LangGraph course', "
+                        "'Open the third video'\n"
+                        "• Files: 'Open File Explorer', 'Open Desktop', 'Show files', "
+                        "'Open the first one'\n"
+                        "• Voice: 'Stop', 'Bye Jarvis' to end session."
+                    )
+                    await self._speak(
+                        emitter, run_id, help_text,
+                        is_voice=is_voice, generation=generation,
+                    )
+                    await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
+                    return
+
+                had_active = self._current_task is not None and not self._current_task.done()
+                await self._cancel(emitter, quiet=not had_active)
+                if had_active:
+                    await emitter.emit(
+                        ev.EventType.RUN_CANCELLED,
+                        code="replaced_by_new_request",
+                        message="Previous request replaced by a new one.",
+                    )
+
+                self._run_counter += 1
+                run_id = (
+                    f"run_{session.session_id[:8]}_{self._run_counter:04d}_"
+                    f"{time.time_ns()}"
+                )
+
+                has_exec_plan = bool(
+                    plan.params.get("plan")
+                    and hasattr(plan.params.get("plan"), "steps")
+                    and len(plan.params["plan"].steps) > 0
+                )
+                is_direct_desktop = (
+                    plan.action == "desktop_control"
+                    and (plan.params.get("desktop_action") or has_exec_plan)
+                )
+                if is_direct_desktop:
+                    await emitter.emit(
+                        ev.EventType.AGENT_STARTED,
+                        run_id=run_id,
+                        action="desktop_control",
+                        params={"text": text},
+                    )
+                    await self._handle_desktop_control(
+                        plan, emitter, run_id, session=session,
+                        is_voice=is_voice, generation=generation
+                    )
+                    return
+
+                await emitter.emit(
+                    ev.EventType.AGENT_STARTED,
+                    run_id=run_id,
+                    action="computer_control",
+                    params={"text": text},
+                )
+                await self._handle_semantic_computer_control(
+                    text,
+                    emitter,
+                    run_id,
+                    session=session,
+                    is_voice=is_voice,
+                    generation=generation,
+                )
+                return
+
+            # Generic browser search fallback removed per Computer Agent specification.
+            # Ambiguous/unknown commands never default to Google Search; they trigger clarification.
 
             # Phase 10: refine ONLY free-text plans via structured LLM intent.
             # Deterministic commands are never second-guessed; when the
@@ -762,8 +1111,51 @@ class JarvisOrchestrator:
             if plan.action == "help":
                 from app.jarvis.intent import GRAMMAR_HELP
 
-                await self._speak(emitter, run_id, GRAMMAR_HELP)
+                await self._speak(
+                    emitter, run_id, GRAMMAR_HELP,
+                    is_voice=is_voice, generation=generation,
+                )
                 await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
+                return
+
+            # ---- Phase 8: desktop control (local OS actions) ----------------
+            if plan.action == "desktop_control":
+                if not getattr(self._settings, "desktop_control_enabled", True):
+                    await self._speak(
+                        emitter, run_id,
+                        "Desktop control is currently disabled.",
+                        is_voice=is_voice,
+                        generation=generation,
+                    )
+                    await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
+                    return
+
+                # Phase 8+: Route to semantic ComputerAgent for natural-language intents.
+                # The old harness path is used only for structured exec_plan commands
+                # (e.g. IntentRouter compound plans) that already have a Plan with
+                # pre-built exec_plan.steps.
+                raw_text_for_agent = str(
+                    plan.params.get("user_query")
+                    or plan.params.get("original_text")
+                    or text
+                )
+                has_exec_plan = bool(
+                    plan.params.get("plan")
+                    and hasattr(plan.params.get("plan"), "steps")
+                    and len(plan.params["plan"].steps) > 0
+                )
+                if plan.params.get("desktop_action") or has_exec_plan:
+                    # Structured plan or direct desktop command — use harness path
+                    await self._handle_desktop_control(
+                        plan, emitter, run_id, session=session,
+                        is_voice=is_voice, generation=generation
+                    )
+                else:
+                    # Natural-language computer control — use semantic ComputerAgent
+                    await self._handle_semantic_computer_control(
+                        raw_text_for_agent, emitter, run_id, session=session,
+                        is_voice=is_voice, generation=generation
+                    )
                 return
 
             # ---- Phase 12: non-workflow capabilities ------------------------
@@ -771,15 +1163,20 @@ class JarvisOrchestrator:
             if effective_intent in NON_WORKFLOW_ACTIONS and plan.action not in {
                 "help",
                 "get_results",
+                "desktop_control",
             }:
                 await self._handle_conversational_intent(
-                    session, plan, emitter, run_id, text
+                    session, plan, emitter, run_id, text,
+                    is_voice=is_voice, generation=generation
                 )
                 return
 
             if plan.action == "get_results":
                 reply, attachments = narrate(session.last_state)
-                await self._speak(emitter, run_id, reply, attachments)
+                await self._speak(
+                    emitter, run_id, reply, attachments,
+                    is_voice=is_voice, generation=generation
+                )
                 await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
                 return
 
@@ -815,11 +1212,19 @@ class JarvisOrchestrator:
                         pref_overrides=prefs or {},
                         select_hint=plan.reply_hint,
                         carry_forward_jobs=carry_forward_jobs,
+                        is_voice=is_voice,
+                        generation=generation,
                     ),
                 )
                 return
 
             if plan.action == "run_discovery":
+                if is_voice:
+                    # Immediately acknowledge before running long discovery
+                    await self._speak(
+                        emitter, run_id, "Sure, searching now.",
+                        is_voice=True, generation=generation, is_acknowledgment=True
+                    )
                 await emitter.emit(
                     ev.EventType.AGENT_THINKING,
                     run_id=run_id,
@@ -835,6 +1240,8 @@ class JarvisOrchestrator:
                         user_params=plan.params,
                         pref_overrides={},
                         select_hint=plan.reply_hint,
+                        is_voice=is_voice,
+                        generation=generation,
                     ),
                 )
                 return
@@ -844,6 +1251,319 @@ class JarvisOrchestrator:
                 code="unknown_action",
                 message=f"unsupported action {plan.action}",
             )
+
+    # ------------------------------------------------------------------
+    async def _handle_semantic_computer_control(
+        self,
+        text: str,
+        emitter: EventEmitter,
+        run_id: str,
+        session: Session | None = None,
+        *,
+        is_voice: bool = False,
+        generation: int | None = None,
+    ) -> None:
+        """Phase 8+ semantic computer-use agent: Plan→Act→Observe→Verify.
+
+        Routes natural-language computer-control utterances through the new
+        ComputerAgent. Never calls career pipeline nodes. Emits typed events
+        that the frontend ComputerControlPage renders in real-time.
+
+        Failure is fail-open: if the ComputerAgent raises unexpectedly, falls
+        back to a truthful error message (never a false success).
+        """
+        if session is not None and getattr(session, "computer_agent", None) is not None:
+            agent = session.computer_agent
+        else:
+            from app.computer.agent import LLMComputerAgent
+            agent = LLMComputerAgent()
+            if session is not None:
+                session.computer_agent = agent
+
+        await emitter.emit(
+            ev.EventType.COMPUTER_PLAN_START,
+            run_id=run_id,
+            text=text,
+        )
+
+        try:
+            async for agent_event in agent.run(
+                text,
+                is_voice=is_voice,
+                session=session,
+                generation=generation,
+            ):
+                etype = agent_event.get("agent_event_type", "")
+
+                if etype == "plan_ready":
+                    await emitter.emit(
+                        ev.EventType.COMPUTER_PLAN_READY,
+                        run_id=run_id,
+                        description=agent_event.get("description", ""),
+                        steps=agent_event.get("steps", []),
+                        step_count=agent_event.get("step_count", 0),
+                    )
+
+                elif etype == "step_start":
+                    await emitter.emit(
+                        ev.EventType.COMPUTER_STEP_START,
+                        run_id=run_id,
+                        step_id=agent_event.get("step_id"),
+                        step_idx=agent_event.get("step_idx", 0),
+                        total_steps=agent_event.get("total_steps", 1),
+                        description=agent_event.get("description", ""),
+                        tool=agent_event.get("tool", ""),
+                    )
+                    await emitter.emit(
+                        ev.EventType.COMPUTER_STEP_STARTED,
+                        run_id=run_id,
+                        step_id=agent_event.get("step_id"),
+                        step_idx=agent_event.get("step_idx", 0),
+                        total_steps=agent_event.get("total_steps", 1),
+                        description=agent_event.get("description", ""),
+                        tool=agent_event.get("tool", ""),
+                    )
+
+                elif etype == "step_done":
+                    c_state = agent_event.get("computer_state") or {}
+                    w_ctx = agent_event.get("web_context") or {}
+
+                    await emitter.emit(
+                        ev.EventType.COMPUTER_STEP_DONE,
+                        run_id=run_id,
+                        step_id=agent_event.get("step_id"),
+                        verified=agent_event.get("verified"),
+                        description=agent_event.get("description", ""),
+                        confidence=agent_event.get("confidence"),
+                        reason=agent_event.get("reason", ""),
+                    )
+                    if agent_event.get("verified"):
+                        await emitter.emit(
+                            ev.EventType.COMPUTER_STEP_VERIFIED,
+                            run_id=run_id,
+                            step_id=agent_event.get("step_id"),
+                            description=agent_event.get("description", ""),
+                            confidence=agent_event.get("confidence"),
+                            reason=agent_event.get("reason", ""),
+                        )
+                    if c_state:
+                        await emitter.emit(
+                            ev.EventType.COMPUTER_STATE_UPDATE,
+                            run_id=run_id,
+                            **c_state,
+                        )
+                    if w_ctx:
+                        await emitter.emit(
+                            ev.EventType.COMPUTER_CONTEXT_UPDATE,
+                            run_id=run_id,
+                            **w_ctx,
+                        )
+
+                elif etype == "step_failed":
+                    c_state = agent_event.get("computer_state") or {}
+                    w_ctx = agent_event.get("web_context") or {}
+
+                    await emitter.emit(
+                        ev.EventType.COMPUTER_STEP_FAILED,
+                        run_id=run_id,
+                        step_id=agent_event.get("step_id"),
+                        description=agent_event.get("description", ""),
+                        reason=agent_event.get("reason", ""),
+                    )
+                    if c_state:
+                        await emitter.emit(
+                            ev.EventType.COMPUTER_STATE_UPDATE,
+                            run_id=run_id,
+                            **c_state,
+                        )
+                    if w_ctx:
+                        await emitter.emit(
+                            ev.EventType.COMPUTER_CONTEXT_UPDATE,
+                            run_id=run_id,
+                            **w_ctx,
+                        )
+                    # Also emit as a legacy desktop_action_result for backward compat
+                    await emitter.emit(
+                        ev.EventType.DESKTOP_ACTION_RESULT,
+                        run_id=run_id,
+                        action=agent_event.get("tool", "computer_control"),
+                        success=False,
+                        message=agent_event.get("reason", ""),
+                        details={},
+                    )
+
+                elif etype == "needs_confirm":
+                    await emitter.emit(
+                        ev.EventType.COMPUTER_NEEDS_CONFIRM,
+                        run_id=run_id,
+                        step_id=agent_event.get("step_id"),
+                        description=agent_event.get("description", ""),
+                    )
+                    await emitter.emit(
+                        ev.EventType.CONFIRMATION_REQUIRED,
+                        run_id=run_id,
+                        step_id=agent_event.get("step_id"),
+                        description=agent_event.get("description", ""),
+                    )
+
+                elif etype == "response":
+                    response_text = agent_event.get("text", "")
+                    verified = agent_event.get("verified")
+                    needs_confirm = agent_event.get("needs_confirm", False)
+                    c_state = agent_event.get("computer_state") or {}
+                    w_ctx = agent_event.get("web_context") or {}
+
+                    await emitter.emit(
+                        ev.EventType.COMPUTER_RESPONSE,
+                        run_id=run_id,
+                        text=response_text,
+                        verified=verified,
+                        needs_confirm=needs_confirm,
+                    )
+                    if c_state:
+                        await emitter.emit(
+                            ev.EventType.COMPUTER_STATE_UPDATE,
+                            run_id=run_id,
+                            **c_state,
+                        )
+                    if w_ctx:
+                        await emitter.emit(
+                            ev.EventType.COMPUTER_CONTEXT_UPDATE,
+                            run_id=run_id,
+                            **w_ctx,
+                        )
+
+                    # Emit as assistant_message so it shows up in chat + voice
+                    await self._speak(
+                        emitter, run_id, response_text,
+                        is_voice=is_voice, generation=generation,
+                        is_acknowledgment=needs_confirm,
+                    )
+
+                    if not needs_confirm:
+                        # Also emit legacy desktop result for existing frontend compat
+                        await emitter.emit(
+                            ev.EventType.DESKTOP_ACTION_RESULT,
+                            run_id=run_id,
+                            action="computer_control",
+                            success=bool(verified),
+                            message=response_text,
+                            details={
+                                "verification": "VERIFIED" if verified else (
+                                    "UNVERIFIED" if verified is None else "FAILED"
+                                ),
+                                "step_results": agent_event.get("step_results", []),
+                            },
+                        )
+
+                elif etype == "error":
+                    await emitter.emit(
+                        ev.EventType.COMPUTER_ERROR,
+                        run_id=run_id,
+                        message=agent_event.get("message", "Unknown computer agent error"),
+                    )
+                    await self._speak(
+                        emitter, run_id,
+                        f"I ran into an error: {agent_event.get('message', 'unknown error')}. "
+                        "Please try again.",
+                        is_voice=is_voice, generation=generation,
+                    )
+
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("ComputerAgent failed unexpectedly: %s", exc)
+            await emitter.emit(
+                ev.EventType.COMPUTER_ERROR,
+                run_id=run_id,
+                message=str(exc),
+            )
+            await self._speak(
+                emitter, run_id,
+                "I encountered an unexpected error processing that computer control request.",
+                is_voice=is_voice, generation=generation,
+            )
+
+        await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
+
+    # ------------------------------------------------------------------
+    async def _handle_desktop_control(
+        self,
+        plan: Plan,
+        emitter: EventEmitter,
+        run_id: str,
+        session: Session | None = None,
+        *,
+        is_voice: bool = False,
+        generation: int | None = None,
+    ) -> None:
+        """Execute desktop control action or compound plan via AgentHarness and report results."""
+        from app.agent.task_manager import default_task_manager
+        from app.desktop.agent_harness import default_harness
+
+        exec_plan = plan.params.get("plan")
+        desktop_action_str = str(plan.params.get("desktop_action", ""))
+        intent_label = plan.intent or desktop_action_str or "desktop_control"
+        total_steps = len(exec_plan.steps) if exec_plan and hasattr(exec_plan, "steps") else 1
+
+        task = default_task_manager.create_task(
+            intent=str(intent_label),
+            total_steps=total_steps,
+            generation=generation,
+        )
+
+        logger.info(
+            "ROUTE: COMPUTER_AGENT | TOOL: %s | TASK: %s",
+            intent_label,
+            task.task_id,
+        )
+
+        if exec_plan and hasattr(exec_plan, "steps") and len(exec_plan.steps) > 1:
+            await emitter.emit(
+                ev.EventType.AGENT_THINKING,
+                run_id=run_id,
+                detail=f"executing plan: {exec_plan.original_text}",
+            )
+            harness_result = default_harness.execute_plan(exec_plan, session=session, task=task)
+        else:
+            await emitter.emit(
+                ev.EventType.AGENT_THINKING,
+                run_id=run_id,
+                detail=f"desktop_control: {desktop_action_str}",
+            )
+            exec_params = {
+                k: v for k, v in plan.params.items()
+                if k not in {"desktop_action", "plan", "route", "is_compound"}
+            }
+            harness_result = default_harness.execute_command(
+                desktop_action_str or plan.intent, exec_params, session=session
+            )
+            if harness_result.success:
+                task.complete(harness_result.details)
+            else:
+                task.fail(harness_result.message)
+
+        # Emit structured desktop result event
+        await emitter.emit(
+            ev.EventType.DESKTOP_ACTION_RESULT,
+            run_id=run_id,
+            task_id=task.task_id,
+            **harness_result.to_dict(),
+        )
+
+        attachments = []
+        if harness_result.needs_user_input and harness_result.pending_prompt:
+            attachments.append({
+                "kind": "credential_prompt",
+                "service": harness_result.pending_prompt.get("service", ""),
+                "field": harness_result.pending_prompt.get("field", "username"),
+                "prompt": harness_result.message,
+            })
+
+        # Also emit as assistant_message so it appears in chat and is spoken
+        await self._speak(
+            emitter, run_id, harness_result.message, attachments=attachments,
+            is_voice=is_voice, generation=generation
+        )
+        await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
 
     # ------------------------------------------------------------------
     async def _handle_resume_upload(
@@ -968,6 +1688,8 @@ class JarvisOrchestrator:
         pref_overrides: Mapping[str, Any],
         select_hint: str | None,
         carry_forward_jobs: list[Any] | None = None,
+        is_voice: bool = False,
+        generation: int | None = None,
     ) -> None:
         # Pre-emptive cancel of any PREVIOUS run. Must never target THIS run:
         # _spawn_run already registered us as _current_task before we started.
@@ -1215,7 +1937,8 @@ class JarvisOrchestrator:
 
         result_snapshot = _result_snapshot(final_state)
         await self._speak(
-            emitter, run_id, reply, attachments, result_snapshot=result_snapshot
+            emitter, run_id, reply, attachments, result_snapshot=result_snapshot,
+            is_voice=is_voice, generation=generation,
         )
         await emitter.emit(ev.EventType.COMPLETED, run_id=run_id)
 
@@ -1293,11 +2016,25 @@ class JarvisOrchestrator:
         attachments: list[dict[str, Any]] | None = None,
         *,
         result_snapshot: dict[str, Any] | None = None,
+        is_voice: bool = False,
+        generation: int | None = None,
+        is_acknowledgment: bool = False,
+        is_termination: bool = False,
     ) -> None:
+        from app.agent.task_manager import default_task_manager
+
+        if generation is not None and not default_task_manager.is_generation_valid(generation):
+            logger.info("Dropping speech for invalidated generation %s: %s", generation, text[:30])
+            return
+
         await emitter.emit(ev.EventType.AGENT_SPEAKING, run_id=run_id)
         data: dict[str, Any] = {
             "text": text,
             "attachments": attachments or [],
+            "is_voice": is_voice,
+            "generation": generation,
+            "is_acknowledgment": is_acknowledgment,
+            "is_termination": is_termination,
         }
         # Canonical location for the workspace snapshot. The legacy
         # attachments entry is intentionally NOT duplicated here.
@@ -1327,13 +2064,21 @@ def _safe_candidate_profile(cp: Mapping[str, Any] | None) -> dict[str, Any] | No
     if not isinstance(profile, Mapping):
         return {
             "status": cp.get("status"),
-            "raw_text": cp.get("raw_text"),
         }
     safe_p = dict(profile)
+    safe_p.pop("raw_text", None)
+    if "contact" in safe_p and isinstance(safe_p["contact"], Mapping):
+        contact_copy = dict(safe_p["contact"])
+        contact_copy["emails"] = []
+        contact_copy["phones"] = []
+        safe_p["contact"] = contact_copy
+    if "identity" in safe_p and isinstance(safe_p["identity"], Mapping):
+        identity_copy = dict(safe_p["identity"])
+        identity_copy["full_name"] = None
+        safe_p["identity"] = identity_copy
     return {
         "status": cp.get("status"),
         "profile": safe_p,
-        "raw_text": cp.get("raw_text") or profile.get("raw_text"),
     }
 
 
@@ -1386,7 +2131,18 @@ def _result_snapshot(final_state: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _safe_params(params: Mapping[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in params.items()}
+    def _sanitize(val: Any) -> Any:
+        if hasattr(val, "to_dict") and callable(val.to_dict):
+            return _sanitize(val.to_dict())
+        if isinstance(val, (str, int, float, bool, type(None))):
+            return val
+        if isinstance(val, Mapping):
+            return {str(k): _sanitize(v) for k, v in val.items()}
+        if isinstance(val, (list, tuple, set)):
+            return [_sanitize(v) for v in val]
+        return str(val)
+
+    return {key: _sanitize(value) for key, value in params.items()}
 
 
 def _prefs_with_target(state: Mapping[str, Any] | None, index: int | None) -> dict | None:

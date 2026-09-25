@@ -37,6 +37,33 @@ class EventType(StrEnum):
     RUN_CANCELLED = "cancelled"
     COMPLETED = "completed"
     ERROR = "error"
+    #: Phase 8: desktop control action result (open app, screenshot, etc.)
+    DESKTOP_ACTION_RESULT = "desktop_action_result"
+    # -----------------------------------------------------------------------
+    # Phase 8+ (Semantic Computer-Use Agent)
+    # -----------------------------------------------------------------------
+    #: Planning phase started (user utterance received, building task plan)
+    COMPUTER_PLAN_START = "computer_plan_start"
+    #: Plan was built successfully — includes step list
+    COMPUTER_PLAN_READY = "computer_plan_ready"
+    #: A single step in the plan is about to execute
+    COMPUTER_STEP_START = "computer_step_start"
+    #: A step completed and was verified
+    COMPUTER_STEP_DONE = "computer_step_done"
+    #: A step completed but verification failed
+    COMPUTER_STEP_FAILED = "computer_step_failed"
+    #: A high-risk step requires user confirmation before proceeding
+    COMPUTER_NEEDS_CONFIRM = "computer_needs_confirm"
+    #: Final truthful response (always gated on verification status)
+    COMPUTER_RESPONSE = "computer_response"
+    #: Unrecoverable computer-agent error
+    COMPUTER_ERROR = "computer_error"
+    #: Part 13: Real-time computer state and context updates
+    COMPUTER_STATE_UPDATE = "computer_state_update"
+    COMPUTER_CONTEXT_UPDATE = "computer_context_update"
+    COMPUTER_STEP_STARTED = "computer_step_started"
+    COMPUTER_STEP_VERIFIED = "computer_step_verified"
+    CONFIRMATION_REQUIRED = "confirmation_required"
 
 
 def make_event(
