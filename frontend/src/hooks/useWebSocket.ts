@@ -591,6 +591,13 @@ export function useWebSocket(wsPath?: string) {
         break
       }
 
+      case 'latency_metrics': {
+        store.setComputerState({
+          latencyMetrics: data.metrics || data,
+        })
+        break
+      }
+
       case 'computer_needs_confirm':
       case 'confirmation_required': {
         store.setComputerState({ needsConfirm: true })

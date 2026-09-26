@@ -99,12 +99,15 @@ class TestBrowserAndCredentialFlows:
         await orch.handle_message(
             session, {"type": "chat", "text": "open youtube"}, send=collector.send
         )
+        await orch.wait_for_run()
 
         assert len(browser.navigated) == 1
         # Canonical YouTube URL includes www prefix
         assert browser.navigated[0] in ("https://youtube.com", "https://www.youtube.com")
         assert session.active_browser is True
-        assert any("Opening YouTube" in msg or "YouTube" in msg for msg in collector.assistant_messages)
+        assert any(
+            "Opening YouTube" in msg or "YouTube" in msg for msg in collector.assistant_messages
+        )
 
     @pytest.mark.asyncio
     async def test_github_credential_flow(
@@ -117,6 +120,7 @@ class TestBrowserAndCredentialFlows:
         await orch.handle_message(
             session, {"type": "chat", "text": "open github"}, send=collector.send
         )
+        await orch.wait_for_run()
         assert session.pending_prompt is not None
         assert session.pending_prompt["service"] == "github"
         assert any("GitHub username" in msg for msg in collector.assistant_messages)
@@ -137,6 +141,7 @@ class TestBrowserAndCredentialFlows:
         await orch.handle_message(
             session, {"type": "chat", "text": "open github"}, send=collector.send
         )
+        await orch.wait_for_run()
         assert session.pending_prompt is None
         assert len(browser.navigated) == 1
         assert browser.navigated[0] in (
@@ -154,6 +159,7 @@ class TestBrowserAndCredentialFlows:
         await orch.handle_message(
             session, {"type": "chat", "text": "open a browser"}, send=collector.send
         )
+        await orch.wait_for_run()
         assert session.active_browser is True
         assert "https://www.google.com" in browser.navigated
 
@@ -162,6 +168,7 @@ class TestBrowserAndCredentialFlows:
         await orch.handle_message(
             session, {"type": "chat", "text": "open python docs"}, send=collector.send
         )
+        await orch.wait_for_run()
         assert len(browser.navigated) == 1
         assert "python+docs" in browser.navigated[0]
 
@@ -170,6 +177,7 @@ class TestBrowserAndCredentialFlows:
         await orch.handle_message(
             session, {"type": "chat", "text": "search for React tutorials"}, send=collector.send
         )
+        await orch.wait_for_run()
         assert len(browser.navigated) == 1
         assert "React+tutorials" in browser.navigated[0] or "React" in browser.navigated[0]
 
@@ -184,6 +192,7 @@ class TestBrowserAndCredentialFlows:
         await orch.handle_message(
             session, {"type": "chat", "text": "open github"}, send=collector.send
         )
+        await orch.wait_for_run()
         assert session.pending_prompt is not None
 
         # Turn 2: User says "never mind"

@@ -64,6 +64,14 @@ class EventType(StrEnum):
     COMPUTER_STEP_STARTED = "computer_step_started"
     COMPUTER_STEP_VERIFIED = "computer_step_verified"
     CONFIRMATION_REQUIRED = "confirmation_required"
+    TASK_STARTED = "task_started"
+    TASK_COMPLETED = "task_completed"
+    TASK_FAILED = "task_failed"
+    TASK_CANCELLED = "task_cancelled"
+    LATENCY_METRICS = "latency_metrics"
+    ACKNOWLEDGEMENT = "acknowledgement"
+    OBSERVATION_UPDATED = "observation_updated"
+    CIRCUIT_BREAKER_TRIPPED = "circuit_breaker_tripped"
 
 
 def make_event(

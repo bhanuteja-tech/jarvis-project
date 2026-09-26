@@ -461,6 +461,45 @@ export function ComputerControlPage({ sendMessage }: ComputerControlPageProps) {
                   </div>
                 </div>
 
+                {computerState.latencyMetrics && (
+                  <div className="mt-3 pt-3 border-t border-jarvis-border/20">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-violet-400 font-bold uppercase text-[10px] tracking-wider">
+                        Latency Breakdown ({computerState.latencyMetrics.system_tier || 'SYSTEM'})
+                      </span>
+                      <span className="text-emerald-400 font-bold text-xs">
+                        TOTAL: {computerState.latencyMetrics.total_latency ?? 0}s
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-[10px]">
+                      <div className="p-2 rounded bg-black/40 border border-jarvis-border/20">
+                        <span className="text-jarvis-muted block text-[9px]">Router</span>
+                        <span className="text-white font-mono">{computerState.latencyMetrics.routing_latency ?? 0}s</span>
+                      </div>
+                      <div className="p-2 rounded bg-black/40 border border-jarvis-border/20">
+                        <span className="text-jarvis-muted block text-[9px]">Laya</span>
+                        <span className="text-white font-mono">{computerState.latencyMetrics.laya_latency ?? 0}s</span>
+                      </div>
+                      <div className="p-2 rounded bg-black/40 border border-jarvis-border/20">
+                        <span className="text-jarvis-muted block text-[9px]">Model</span>
+                        <span className="text-white font-mono">{computerState.latencyMetrics.model_latency ?? 0}s</span>
+                      </div>
+                      <div className="p-2 rounded bg-black/40 border border-jarvis-border/20">
+                        <span className="text-jarvis-muted block text-[9px]">Tool</span>
+                        <span className="text-white font-mono">{computerState.latencyMetrics.tool_latency ?? 0}s</span>
+                      </div>
+                      <div className="p-2 rounded bg-black/40 border border-jarvis-border/20">
+                        <span className="text-jarvis-muted block text-[9px]">Observation</span>
+                        <span className="text-white font-mono">{computerState.latencyMetrics.observation_latency ?? 0}s</span>
+                      </div>
+                      <div className="p-2 rounded bg-black/40 border border-jarvis-border/20">
+                        <span className="text-jarvis-muted block text-[9px]">Verification</span>
+                        <span className="text-white font-mono">{computerState.latencyMetrics.verification_latency ?? 0}s</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {computerState.observation && (
                   <div className="mt-2 pt-2 border-t border-jarvis-border/10">
                     <span className="text-jarvis-muted block mb-1">Observation:</span>

@@ -11,6 +11,7 @@ Phase 8+: Extended with WebContext (YouTube/site hierarchical state), last_resul
 
 from __future__ import annotations
 
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -66,8 +67,6 @@ class WebContext:
             "ordinal_basis": self.ordinal_basis,
         }
 
-
-import time
 
 
 @dataclass

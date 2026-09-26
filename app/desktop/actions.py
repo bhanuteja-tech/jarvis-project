@@ -28,6 +28,13 @@ class DesktopAction(StrEnum):
     LIST_FILES = "list_files"
     OPEN_RESUME = "open_resume"
     FOCUS_APP = "focus_app"
+    BROWSER_NAVIGATE = "browser_navigate"
+    BROWSER_SEARCH = "browser_search"
+    BROWSER_BACK = "browser_back"
+    BROWSER_FORWARD = "browser_forward"
+    BROWSER_CLICK = "browser_click"
+    BROWSER_TYPE = "browser_type"
+    SEND_MESSAGE = "send_message"
 
 
 @dataclass(frozen=True)

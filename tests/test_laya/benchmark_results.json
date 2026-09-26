@@ -1,9 +1,9 @@
 {
-  "benchmark_timestamp": 1790357148.7529287,
+  "benchmark_timestamp": 1790438905.519929,
   "total_cases": 10,
   "accurate_cases": 10,
   "accuracy_pct": 100.0,
-  "avg_laya_latency_ms": 0.31,
+  "avg_laya_latency_ms": 0.34,
   "escalation_count": 0,
   "escalation_rate_pct": 0.0,
   "results": [
@@ -15,7 +15,7 @@
       "expected": "filesystem",
       "confidence": 0.95,
       "accurate": true,
-      "laya_latency_ms": 0.73,
+      "laya_latency_ms": 0.5,
       "llm_route_tier": "LOCAL_FAST",
       "llm_model": "llama3.2:3b"
     },
@@ -27,7 +27,7 @@
       "expected": "browser",
       "confidence": 0.95,
       "accurate": true,
-      "laya_latency_ms": 0.43,
+      "laya_latency_ms": 0.38,
       "llm_route_tier": "LOCAL_FAST",
       "llm_model": "llama3.2:3b"
     },
@@ -51,7 +51,7 @@
       "expected": "C:/Users/Music",
       "confidence": 0.5,
       "accurate": true,
-      "laya_latency_ms": 0.18,
+      "laya_latency_ms": 0.27,
       "llm_route_tier": "LOCAL_FAST",
       "llm_model": "llama3.2:3b"
     },
@@ -63,7 +63,7 @@
       "expected": "previous directory listing",
       "confidence": 0.5,
       "accurate": true,
-      "laya_latency_ms": 0.15,
+      "laya_latency_ms": 0.32,
       "llm_route_tier": "LOCAL_FAST",
       "llm_model": "llama3.2:3b"
     },
@@ -75,7 +75,7 @@
       "expected": "file_c.zip",
       "confidence": 0.96,
       "accurate": true,
-      "laya_latency_ms": 0.22,
+      "laya_latency_ms": 0.26,
       "llm_route_tier": "LOCAL_FAST",
       "llm_model": "llama3.2:3b"
     },
@@ -87,7 +87,7 @@
       "expected": "True",
       "confidence": 0.92,
       "accurate": true,
-      "laya_latency_ms": 0.18,
+      "laya_latency_ms": 0.36,
       "llm_route_tier": "LOCAL_FAST",
       "llm_model": "llama3.2:3b"
     },
@@ -99,7 +99,7 @@
       "expected": "count_directory_items",
       "confidence": 0.5,
       "accurate": true,
-      "laya_latency_ms": 0.42,
+      "laya_latency_ms": 0.35,
       "llm_route_tier": "LOCAL_FAST",
       "llm_model": "llama3.2:3b"
     },
@@ -111,7 +111,7 @@
       "expected": "True",
       "confidence": 0.92,
       "accurate": true,
-      "laya_latency_ms": 0.31,
+      "laya_latency_ms": 0.38,
       "llm_route_tier": "LOCAL_FAST",
       "llm_model": "llama3.2:3b"
     },
@@ -123,7 +123,7 @@
       "expected": "Lohit",
       "confidence": 0.95,
       "accurate": true,
-      "laya_latency_ms": 0.22,
+      "laya_latency_ms": 0.32,
       "llm_route_tier": "LOCAL_FAST",
       "llm_model": "llama3.2:3b"
     }

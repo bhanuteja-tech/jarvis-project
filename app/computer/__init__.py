@@ -17,19 +17,8 @@ Architecture:
     TruthfulResponseGenerator → Verified spoken response builder
 """
 
-from __future__ import annotations
+from typing import Any
 
-from app.computer.agent import LLMComputerAgent
-from app.computer.context import (
-    ActionRecord,
-    BrowserResultEntity,
-    BrowserTabEntity,
-    FileSystemEntity,
-    TypedContext,
-    WindowEntity,
-    YouTubeVideoEntity,
-)
-from app.computer.executor import ComputerAgent, default_computer_agent
 from app.computer.firewall import SemanticFirewall, ToolValidationResult
 from app.computer.intent_extractor import ComputerIntentExtractor, default_extractor
 from app.computer.reference_resolver import ReferenceResolver, default_resolver
@@ -37,6 +26,24 @@ from app.computer.response_generator import TruthfulResponseGenerator, default_r
 from app.computer.semantic_planner import SemanticTaskPlanner, default_planner
 from app.computer.tools import COMPUTER_TOOL_DEFINITIONS, COMPUTER_TOOLS_BY_NAME
 from app.computer.web_context_tracker import WebContextTracker, default_web_context_tracker
+
+
+def __getattr__(name: str) -> Any:
+    if name in ("ComputerAgent", "LLMComputerAgent", "default_computer_agent"):
+        from app.computer.agent import (
+            ComputerAgent,
+            LLMComputerAgent,
+            default_computer_agent,
+        )
+
+        mapping = {
+            "ComputerAgent": ComputerAgent,
+            "LLMComputerAgent": LLMComputerAgent,
+            "default_computer_agent": default_computer_agent,
+        }
+        return mapping[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "LLMComputerAgent",

@@ -304,10 +304,13 @@ els.cancelBtn.addEventListener("click", () => {
 // live step strip opens the activity timeline
 els.liveStep.addEventListener("click", () => activateTab("activity"));
 
-// stop a spoken reply mid-utterance
+// stop a spoken reply mid-utterance and cancel active work
 els.stopSpeakBtn.addEventListener("click", () => {
+  continuousVoice = false;
   cancelSpeak();
+  stopListening();
   setVoice({ speaking: false });
+  send("cancel");
 });
 
 // close the grammar popover when a command example is clicked
@@ -818,16 +821,10 @@ els.chatForm.addEventListener("submit", (event) => {
 
 // ---- voice ---------------------------------------------------------------------------
 let listening = null;
+let continuousVoice = false;
 
-els.micBtn.addEventListener("click", () => {
-  if (listening) {
-    stopListening();
-    return;
-  }
-  if (!sttSupported()) {
-    addMessage("error", "Speech recognition is not supported in this browser.");
-    return;
-  }
+function startVoiceSession() {
+  if (listening) return;
   cancelSpeak();
   listening = startListening({
     onStart: () => {
@@ -836,19 +833,54 @@ els.micBtn.addEventListener("click", () => {
       els.micBtn.setAttribute("aria-pressed", "true");
       setAvatar("listening");
     },
-    onInterim: (transcript) => setVoice({ transcript }),
+    onInterim: (transcript) => {
+      setVoice({ transcript });
+      // Barge-in: if user starts speaking while assistant is speaking, cancel TTS immediately
+      const curState = getState();
+      if (curState.voice.speaking) {
+        cancelSpeak();
+        setVoice({ speaking: false });
+        send("voice_barge_in", { text: transcript });
+      }
+    },
     onEnd: () => {
       setVoice({ listening: false });
       els.micBtn.classList.remove("is-recording");
       els.micBtn.setAttribute("aria-pressed", "false");
+      listening = null;
     },
     onFinal: (transcript) => {
-      if (transcript) submitUserText(transcript);
+      listening = null;
+      if (transcript) {
+        submitUserText(transcript);
+      } else if (continuousVoice) {
+        setTimeout(() => {
+          if (continuousVoice && !listening && !getState().voice.speaking) {
+            startVoiceSession();
+          }
+        }, 400);
+      }
     },
   });
+}
+
+els.micBtn.addEventListener("click", () => {
+  if (continuousVoice || listening) {
+    continuousVoice = false;
+    stopListening();
+    return;
+  }
+  if (!sttSupported()) {
+    addMessage("error", "Speech recognition is not supported in this browser.");
+    return;
+  }
+  cancelSpeak();
+  continuousVoice = true;
+  startVoiceSession();
 });
 
 function stopListening() {
+  continuousVoice = false;
   listening?.stop();
   listening = null;
   setVoice({ listening: false, transcript: "" });
@@ -1026,9 +1058,33 @@ function handleEvent(envelope) {
         setVoice({ speaking: true });
         setAvatar("speaking");
       },
-      onEnd: () => setVoice({ speaking: false }),
+      onEnd: () => {
+        setVoice({ speaking: false });
+        if (envelope.data?.is_termination) {
+          continuousVoice = false;
+          stopListening();
+          return;
+        }
+        // Automatic return to listening for continuous voice mode (Rule 29)
+        if (continuousVoice && !listening) {
+          setTimeout(() => {
+            if (continuousVoice && !listening && !getState().voice.speaking) {
+              startVoiceSession();
+            }
+          }, 350);
+        }
+      },
     });
-    if (!enabled) setAvatar("success");
+    if (!enabled) {
+      setAvatar("success");
+      if (continuousVoice && !listening && !envelope.data?.is_termination) {
+        setTimeout(() => {
+          if (continuousVoice && !listening && !getState().voice.speaking) {
+            startVoiceSession();
+          }
+        }, 350);
+      }
+    }
     return;
   }
 

@@ -114,6 +114,7 @@ export interface ComputerStateInfo {
   activeWindow?: string | null
   currentUrl?: string | null
   isExplorerActive?: boolean
+  latencyMetrics?: Record<string, any> | null
 }
 
 export interface ComputerContextInfo {
@@ -294,6 +295,7 @@ export const useStore = create<JarvisState>((set) => ({
     lastResponse: '',
     needsConfirm: false,
     stepResults: [],
+    latencyMetrics: null,
   },
   setComputerState: (updates) => set((s) => ({
     computerState: { ...s.computerState, ...updates },
@@ -309,6 +311,7 @@ export const useStore = create<JarvisState>((set) => ({
       lastResponse: '',
       needsConfirm: false,
       stepResults: [],
+      latencyMetrics: null,
     }
   }),
 

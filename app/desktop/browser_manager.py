@@ -127,9 +127,9 @@ class BrowserManager:
 
         display = self.display_name(canonical)
 
-        # 1. If already open and focused, reuse window
+        # 1. If already open, reuse window
         existing_win = self.find_browser_window(canonical)
-        if existing_win and not url:
+        if existing_win:
             self.window_controller.bring_to_front(existing_win["hwnd"])
             self.session.window_id = existing_win["window_id"]
             self.session.hwnd = existing_win["hwnd"]
@@ -140,6 +140,8 @@ class BrowserManager:
                 last_action="open_browser",
             )
             self._sync_state()
+            if url:
+                return self.navigate(url, explicit_browser=canonical)
             return True, f"{display} is open. What would you like me to do next?"
 
         # 2. Launch browser process
@@ -170,13 +172,13 @@ class BrowserManager:
         start_time = time.perf_counter()
         verified_win = None
         while time.perf_counter() - start_time < 4.0:
-            time.sleep(0.25)
             win = self.find_browser_window(canonical)
             if win:
                 self.window_controller.bring_to_front(win["hwnd"])
                 if self.window_controller.is_window_active(win["hwnd"]):
                     verified_win = win
                     break
+            time.sleep(0.05)
 
         if verified_win:
             self.session.window_id = verified_win["window_id"]
@@ -246,7 +248,6 @@ class BrowserManager:
 
             deadline = time.perf_counter() + verify_timeout
             while time.perf_counter() < deadline:
-                time.sleep(0.3)
                 active = self.window_controller.get_active_window()
                 if active:
                     title = (active.get("title") or "").lower()
@@ -254,6 +255,7 @@ class BrowserManager:
                         verified = True
                         verify_reason = f"window title contains '{verify_domain}'"
                         break
+                time.sleep(0.05)
             if not verified:
                 verify_reason = f"window title did not contain '{verify_domain}' within {verify_timeout}s"
 

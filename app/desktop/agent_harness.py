@@ -264,7 +264,11 @@ class AgentHarness:
                 canon_lower = app_name.lower()
                 self.state.active_application = display_name
                 self.state.last_target = display_name
-                if canon_lower in {"chrome", "google chrome", "google_chrome", "edge", "microsoft edge", "microsoft_edge", "browser"}:
+                browser_aliases = {
+                    "chrome", "google chrome", "google_chrome", "edge",
+                    "microsoft edge", "microsoft_edge", "browser",
+                }
+                if canon_lower in browser_aliases:
                     b_canon = "microsoft_edge" if "edge" in canon_lower else "google_chrome"
                     self.state.browser_name = b_canon
                     self.state.browser = b_canon
@@ -330,7 +334,9 @@ class AgentHarness:
             if target.lower() == "desktop":
                 res = self.desktop_controller.open_desktop()
             else:
-                res = self.desktop_controller.open_folder(target, parent=parent, display_name=display)
+                res = self.desktop_controller.open_folder(
+                    target, parent=parent, display_name=display
+                )
             return HarnessResult(
                 success=res.get("success", False),
                 message=res.get("message", res.get("error", "Failed to open folder")),
@@ -348,7 +354,9 @@ class AgentHarness:
             )
             parent = params.get("parent")
             item_type = params.get("item_type", "folder")
-            fs_res = self.fs_controller.count_directory_items(target, parent=parent, item_type=item_type)
+            fs_res = self.fs_controller.count_directory_items(
+                target, parent=parent, item_type=item_type
+            )
             if isinstance(fs_res, dict):
                 count_val = fs_res.get("count", 0)
                 msg = fs_res.get("message") or f"There are {count_val} {item_type}s in {target}."
@@ -589,13 +597,70 @@ class AgentHarness:
                 details={"direction": direction, "computer_state": self.state.to_dict()},
             )
 
-        if lower_action in {"click_element", "click"}:
-            target = str(params.get("target") or "element")
+        if lower_action in {"browser_click", "click_element", "click"}:
+            target = str(params.get("target") or "element").strip()
+            ordinal = params.get("ordinal")
+            # If target has a full URL, navigate there directly
+            if target.startswith(("http://", "https://")):
+                ok, msg = self.browser.navigate(target)
+                if self.state.web_context:
+                    self.state.web_context.page = "page"
+                    self.state.web_context.current_url = target
+                return HarnessResult(
+                    success=ok,
+                    message=msg if ok else f"Could not navigate to {target}",
+                    action="browser_click",
+                    details={
+                        "target": target,
+                        "url": target,
+                        "computer_state": self.state.to_dict(),
+                    },
+                )
+
+            # Check if target or ordinal matches an item in web_context or session/state
+            resolved_url = None
+            if self.state.web_context and self.state.web_context.current_list:
+                for idx, it in enumerate(self.state.web_context.current_list):
+                    if (ordinal is not None and idx + 1 == ordinal) or (
+                        target.lower() in (it.get("title") or "").lower()
+                        or (it.get("url") and target.lower() in it.get("url", "").lower())
+                    ):
+                        resolved_url = it.get("url")
+                        break
+
+            if resolved_url and resolved_url.startswith(("http://", "https://")):
+                ok, msg = self.browser.navigate(resolved_url)
+                return HarnessResult(
+                    success=ok,
+                    message=f"Clicked {target}" if ok else f"Failed to click {target}: {msg}",
+                    action="browser_click",
+                    details={
+                        "target": target,
+                        "url": resolved_url,
+                        "ordinal": ordinal,
+                        "computer_state": self.state.to_dict(),
+                    },
+                )
+
             return HarnessResult(
                 success=True,
                 message=f"Clicked {target}.",
-                action="click",
-                details={"target": target, "computer_state": self.state.to_dict()},
+                action="browser_click",
+                details={
+                    "target": target,
+                    "ordinal": ordinal,
+                    "computer_state": self.state.to_dict(),
+                },
+            )
+
+        if lower_action in {"browser_type", "type_text"}:
+            text = str(params.get("text") or "").strip()
+            target = params.get("target")
+            return HarnessResult(
+                success=True,
+                message=f"Typed '{text}'.",
+                action="browser_type",
+                details={"text": text, "target": target, "computer_state": self.state.to_dict()},
             )
 
         # 7. Browser: Open / Launch
@@ -700,7 +765,7 @@ class AgentHarness:
             ok, msg = self.browser.search(query, engine=service_target)
             if session is not None:
                 session.active_browser = True
-            last_u = getattr(self.browser, "last_url", None)
+            last_u = getattr(self.browser, "last_url", None) or getattr(self.browser, "_active_url", None)
             return HarnessResult(
                 success=ok,
                 message=msg if ok else f"Could not search for '{query}': {msg}",
@@ -717,7 +782,7 @@ class AgentHarness:
         if (
             action == Intent.BROWSER_BACK
             or action_str == "BROWSER_BACK"
-            or lower_action in {"navigate_back", "go_back"}
+            or lower_action in {"navigate_back", "go_back", "browser_back"}
         ):
             ok, msg = self.browser.go_back()
             return HarnessResult(
@@ -730,7 +795,7 @@ class AgentHarness:
         if (
             action == Intent.BROWSER_FORWARD
             or action_str == "BROWSER_FORWARD"
-            or lower_action in {"navigate_forward", "go_forward"}
+            or lower_action in {"navigate_forward", "go_forward", "browser_forward"}
         ):
             ok, msg = self.browser.go_forward()
             return HarnessResult(
@@ -741,7 +806,11 @@ class AgentHarness:
             )
 
         # 11. Messaging / External Actions & Safety Confirmation
-        if action == Intent.MESSAGING_SEND or action_str == "MESSAGING_SEND":
+        if (
+            action == Intent.MESSAGING_SEND
+            or action_str == "MESSAGING_SEND"
+            or lower_action in {"send_message", "prepare_message"}
+        ):
             recipient = str(params.get("recipient", "")).strip()
             message_text = str(params.get("message", "")).strip()
             res = self.messaging_controller.prepare_message(recipient, message_text)
@@ -903,7 +972,11 @@ class AgentHarness:
                 success=ok,
                 message=msg,
                 action="open_service",
-                details={**(resolution.details or {}), "url": nav_target, "computer_state": self.state.to_dict()},
+                details={
+                    **(resolution.details or {}),
+                    "url": nav_target,
+                    "computer_state": self.state.to_dict(),
+                },
             )
 
         return HarnessResult(
@@ -1072,7 +1145,9 @@ class AgentHarness:
     def search_files(
         self, query: str = "", directory: str | None = None, **kwargs: Any
     ) -> dict[str, Any]:
-        res = self.execute_command("search_files", {"query": query, "directory": directory, **kwargs})
+        res = self.execute_command(
+            "search_files", {"query": query, "directory": directory, **kwargs}
+        )
         out = res.to_dict()
         out.update(res.details)
         return out
@@ -1112,7 +1187,9 @@ class AgentHarness:
     def browser_click(
         self, target: str, ordinal: int | None = None, **kwargs: Any
     ) -> dict[str, Any]:
-        res = self.execute_command("browser_click", {"target": target, "ordinal": ordinal, **kwargs})
+        res = self.execute_command(
+            "browser_click", {"target": target, "ordinal": ordinal, **kwargs}
+        )
         out = res.to_dict()
         out.update(res.details)
         return out

@@ -79,7 +79,9 @@ TOOL_ALIASES: dict[str, str] = {
 
 ARGUMENT_SYNONYMS: dict[str, list[str]] = {
     "application": ["app", "app_name", "name", "target", "application_name", "app_title"],
-    "path": ["folder", "directory", "dir", "file", "filepath", "target", "folder_path", "path_name"],
+    "path": [
+        "folder", "directory", "dir", "file", "filepath", "target", "folder_path", "path_name"
+    ],
     "directory": ["folder", "path", "dir", "target"],
     "item_type": ["type", "kind"],
     "query": ["q", "search_query", "text", "search_term", "keyword"],
@@ -108,10 +110,28 @@ class SemanticFirewall:
 
         # Smart tool intent normalization
         if canon_tool_name == "browser_navigate":
-            nav_target = str(arguments.get("url") or arguments.get("target") or arguments.get("application") or "").strip().lower()
-            if nav_target in ("chrome", "google chrome", "google_chrome", "whatsapp", "vs code", "vscode", "visual studio code", "file explorer"):
+            nav_target = str(
+                arguments.get("url")
+                or arguments.get("target")
+                or arguments.get("application")
+                or ""
+            ).strip().lower()
+            desktop_apps = (
+                "chrome", "google chrome", "google_chrome", "whatsapp",
+                "vs code", "vscode", "visual studio code", "file explorer"
+            )
+            if nav_target in desktop_apps:
                 canon_tool_name = "open_application"
-                arguments = {"application": "Google Chrome" if "chrome" in nav_target else ("Visual Studio Code" if "vs" in nav_target else ("WhatsApp" if "whatsapp" in nav_target else "File Explorer"))}
+                app_dest = (
+                    "Google Chrome"
+                    if "chrome" in nav_target
+                    else (
+                        "Visual Studio Code"
+                        if "vs" in nav_target
+                        else ("WhatsApp" if "whatsapp" in nav_target else "File Explorer")
+                    )
+                )
+                arguments = {"application": app_dest}
             elif nav_target in ("back", "previous", "go back"):
                 canon_tool_name = "browser_back"
                 arguments = {}
@@ -151,13 +171,13 @@ class SemanticFirewall:
 
         if canon_tool_name in ("open_application", "focus_application"):
             app_raw = str(cleaned_args.get("application") or "").lower().strip()
-            # If target is a standard user folder (e.g. Music, Desktop, Downloads), route to open_folder
+            # If target is a standard user folder, route to open_folder
             if app_raw in ("music", "desktop", "downloads", "documents", "pictures", "videos"):
                 canon_tool_name = "open_folder"
                 definition = COMPUTER_TOOLS_BY_NAME.get("open_folder")
                 cleaned_args = {"path": app_raw.title()}
             # If target matches an active youtube video entity, route to browser_click
-            elif context.youtube_video_results:
+            elif context.youtube_video_results and context.last_active_domain != "filesystem":
                 matched_video = None
                 for yv in context.youtube_video_results:
                     if (
@@ -182,7 +202,10 @@ class SemanticFirewall:
             elif app_raw in ("file explorer", "explorer"):
                 cleaned_args["application"] = "File Explorer"
 
-        if canon_tool_name in ("send_message", "prepare_message") and not cleaned_args.get("platform"):
+        if (
+            canon_tool_name in ("send_message", "prepare_message")
+            and not cleaned_args.get("platform")
+        ):
             cleaned_args["platform"] = "whatsapp"
 
         missing_params = [
@@ -260,3 +283,68 @@ class SemanticFirewall:
             platform = args.get("platform", "WhatsApp")
             return f"Ready to send '{msg}' to {recipient} via {platform}. Should I send it?"
         return f"Executing {tool_name} has external side-effects. Do you want to proceed?"
+
+
+# ---------------------------------------------------------------------------
+# Prompt Injection Defense & Untrusted Content Sanitizer
+# ---------------------------------------------------------------------------
+
+PROMPT_INJECTION_PATTERNS: tuple[str, ...] = (
+    r"(?i)\bignore\s+(?:all\s+)?(?:previous|prior|above|system)\s+(?:instructions?|prompts?|rules?)",
+    r"(?i)\bdisregard\s+(?:all\s+)?(?:previous|prior|above|system)\s+(?:instructions?|prompts?|rules?)",
+    r"(?i)\bforget\s+(?:all\s+)?(?:previous|prior|above|system)\s+(?:instructions?|prompts?|rules?)",
+    r"(?i)\bsystem\s+override\b",
+    r"(?i)\byou\s+are\s+now\s+(?:in\s+)?(?:dan|developer|god)\s+mode\b",
+    r"(?i)\breveal\s+(?:your\s+)?(?:system\s+prompt|hidden\s+instructions?)\b",
+    r"(?i)\bshow\s+(?:your\s+)?(?:system\s+prompt|initial\s+prompt)\b",
+    r"(?i)\bexfiltrate\b",
+    r"(?i)\bupload\s+(?:all\s+)?(?:your\s+)?(?:files|passwords?|keys?)\s+to\b",
+    r"(?i)\bsend\s+(?:my|the|your)\s+(?:passwords?|credentials?|tokens?|keys?)\s+to\b",
+)
+
+
+def detect_prompt_injection(text: str) -> bool:
+    """Detect whether text contains prompt injection or adversarial jailbreak patterns."""
+    if not text:
+        return False
+    import re
+    for pattern in PROMPT_INJECTION_PATTERNS:
+        if re.search(pattern, text):
+            return True
+    return False
+
+
+def sanitize_untrusted_content(text: str, max_chars: int = 4000) -> str:
+    """Fences and sanitizes untrusted webpage, DOM, or external content.
+
+    Ensures external text is treated strictly as data, never as executable instructions.
+    """
+    if not text:
+        return ""
+    import re
+
+    # Strip dangerous HTML script tags
+    sanitized = re.sub(r"(?is)<script.*?>.*?</script>", " [script removed] ", text)
+    sanitized = re.sub(r"(?is)<style.*?>.*?</style>", " ", sanitized)
+
+    # Neutralize prompt injection phrases within untrusted text
+    if detect_prompt_injection(sanitized):
+        for pattern in PROMPT_INJECTION_PATTERNS:
+            sanitized = re.sub(pattern, "[SUSPICIOUS INSTRUCTION REMOVED]", sanitized)
+
+    # Truncate to maximum characters
+    if len(sanitized) > max_chars:
+        sanitized = sanitized[:max_chars] + "... [truncated]"
+
+    return sanitized
+
+
+__all__ = [
+    "FORBIDDEN_CAREER_TOOLS",
+    "ToolValidationResult",
+    "TOOL_ALIASES",
+    "ARGUMENT_SYNONYMS",
+    "SemanticFirewall",
+    "detect_prompt_injection",
+    "sanitize_untrusted_content",
+]

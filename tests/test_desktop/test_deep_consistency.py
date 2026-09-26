@@ -19,19 +19,16 @@ Verifies the 14 core consistency scenarios:
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from app.agent.task_manager import TaskLifecycle, TaskManager
+from app.agent.task_manager import TaskManager
+from app.computer.executor import ComputerAgent
 from app.computer.intent_extractor import ComputerIntentExtractor
 from app.computer.semantic_planner import SemanticTaskPlanner, VerificationStrategy
-from app.computer.executor import ComputerAgent, HarnessDispatcher
-from app.desktop.agent_harness import AgentHarness
 from app.desktop.desktop_controller import DesktopController
-from app.desktop.filesystem_controller import FileSystemController
 from app.desktop.state import ComputerState, VerifiedState
 from app.desktop.verifier import VerificationService
 from app.jarvis.sessions import CareerSession, ComputerSession, InMemorySessionStore
@@ -65,13 +62,15 @@ def verifier():
 def test_scenario_1_youtube_homepage(extractor, planner, clean_state, verifier):
     """'Go to the homepage in YouTube' must navigate to homepage, never search."""
     intent = extractor.extract("Go to the homepage in YouTube", clean_state)
-    assert intent.target_type == "SITE_HOME" or (intent.target and intent.target.lower() in ("home", "homepage"))
+    assert intent.target_type == "SITE_HOME" or (
+        intent.target and intent.target.lower() in ("home", "homepage")
+    )
     assert intent.site == "youtube" or intent.destination.site == "youtube"
 
     plan = planner.plan(intent, clean_state)
     assert len(plan.steps) >= 1
     nav_step = [s for s in plan.steps if s.tool == "navigate_browser"][0]
-    
+
     # Must NOT contain search_query
     assert "search_query" not in nav_step.params["url"]
     assert "youtube.com" in nav_step.params["url"]
@@ -127,7 +126,10 @@ def test_scenario_3_open_desktop_resets_web_context(clean_state, verifier):
         is_verified=True,
         verified_app="File Explorer",
         verified_directory=str(Path.home() / "Desktop"),
-        evidence={"current_directory": str(Path.home() / "Desktop"), "active_application": "File Explorer"},
+        evidence={
+            "current_directory": str(Path.home() / "Desktop"),
+            "active_application": "File Explorer",
+        },
     )
     clean_state.current_generation = 1
     committed = clean_state.commit_verified_state(v_state)
@@ -164,11 +166,16 @@ def test_scenario_4_folder_counting(extractor, planner, clean_state):
 def test_scenario_5_zero_fake_items(clean_state):
     """Context list must contain 0 synthetic fake items."""
     from app.computer.web_context_tracker import WebContextTracker
+
     tracker = WebContextTracker(clean_state)
-    tracker.update_from_navigation("https://www.youtube.com/results?search_query=python", "python - YouTube")
-    
+    tracker.update_from_navigation(
+        "https://www.youtube.com/results?search_query=python", "python - YouTube"
+    )
+
     # Neither web_context nor last_results should have synthetic fake video items
-    assert not any(" - Video " in item.get("title", "") for item in clean_state.web_context.current_list)
+    assert not any(
+        " - Video " in item.get("title", "") for item in clean_state.web_context.current_list
+    )
     assert not any(" - Video " in item.get("title", "") for item in clean_state.last_results)
 
 
@@ -200,6 +207,7 @@ def test_scenario_7_explicit_vs_implicit_browser(extractor, planner, clean_state
     assert intent1.explicit_browser == "microsoft_edge"
 
     plan1 = planner.plan(intent1, clean_state)
+    assert len(plan1.steps) >= 1
     clean_state.browser_specifically_requested = "microsoft_edge"
     clean_state.browser_name = "microsoft_edge"
 
@@ -374,7 +382,9 @@ async def test_scenario_15_file_counting_and_generation_reliability(clean_state)
     agent = ComputerAgent(state=clean_state)
     voice_gen = 1
     events = []
-    async for ev in agent.run("how many files are available in music", is_voice=True, generation=voice_gen):
+    async for ev in agent.run(
+        "how many files are available in music", is_voice=True, generation=voice_gen
+    ):
         events.append(ev)
 
     response_events = [e for e in events if e.get("agent_event_type") == "response"]
@@ -385,4 +395,3 @@ async def test_scenario_15_file_counting_and_generation_reliability(clean_state)
 
     # Generation 1 must remain valid in task manager (never prematurely invalidated)
     assert default_task_manager.is_generation_valid(voice_gen) is True
-

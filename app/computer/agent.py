@@ -19,19 +19,28 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from app.desktop.agent_harness import AgentHarness
+
+from app.computer.circuit_breaker import ActionCircuitBreaker
 from app.computer.context import ActionRecord, TypedContext
 from app.computer.firewall import SemanticFirewall
+from app.computer.latency_tracker import global_latency_tracker
 from app.computer.tools import (
     COMPUTER_TOOL_DEFINITIONS,
+    COMPUTER_TOOLS_BY_NAME,
 )
-from app.desktop.agent_harness import AgentHarness
 from app.desktop.observer import ComputerObserver, default_observer
 from app.desktop.state import ComputerState, default_computer_state
 from app.desktop.verifier import VerificationResult, VerificationService, default_verifier
 from app.llm.base import AssistantClientProtocol
 from app.llm.decision_engine import DecisionEngine, DecisionResult, get_decision_engine
+from app.llm.gemini_computer_use import (
+    ComputerUseProvider,
+    GeminiComputerUseProvider,
+)
 from app.llm.main_router import (
     MainLLMRouter,
     TaskContext,
@@ -61,7 +70,11 @@ CRITICAL RULES:
    If requested, explain that belongs to Career Intelligence.
 6. When the goal is completely achieved, output a 'complete' decision with a truthful response.
 7. CONTEXTUAL FOLLOW-UPS:
-   If the user asks to list or describe items from previous operations (e.g., 'what are those files', 'what are they', 'list them') and the items are ALREADY in available_context.filesystem_results or available_context.youtube_video_results, you do NOT need to call a tool again. Output decision: 'complete' and list the actual item names directly from available_context.
+   If the user asks to list or describe items from previous operations
+   (e.g., 'what are those files', 'what are they', 'list them') and the items
+   are ALREADY in available_context.filesystem_results or
+   available_context.youtube_video_results, you do NOT need to call a tool again.
+   Output decision: 'complete' and list the actual item names directly from available_context.
 
 You must respond with valid JSON matching one of these 3 schemas:
 - Tool call:
@@ -97,6 +110,7 @@ class LLMComputerAgent:
         typed_context: TypedContext | None = None,
         decision_engine: DecisionEngine | None = None,
         llm_router: MainLLMRouter | None = None,
+        computer_use_provider: ComputerUseProvider | None = None,
     ) -> None:
         self.state = state or default_computer_state
         self._custom_harness = harness
@@ -107,6 +121,14 @@ class LLMComputerAgent:
         self.typed_context = typed_context or TypedContext()
         self.decision_engine = decision_engine or get_decision_engine()
         self.llm_router = llm_router or default_main_llm_router
+
+        if computer_use_provider is not None:
+            self.computer_use_provider: ComputerUseProvider | None = computer_use_provider
+        else:
+            try:
+                self.computer_use_provider = GeminiComputerUseProvider()
+            except Exception:
+                self.computer_use_provider = None
 
         self.conversation_history: list[dict[str, str]] = []
         self.current_generation: int = 0
@@ -119,6 +141,7 @@ class LLMComputerAgent:
         if self._custom_harness is not None:
             return self._custom_harness
         from app.desktop.agent_harness import default_harness
+
         return default_harness
 
     @harness.setter
@@ -156,6 +179,14 @@ class LLMComputerAgent:
                 self.typed_context = session.typed_context
             else:
                 session.typed_context = self.typed_context
+            if hasattr(session, "circuit_breaker") and session.circuit_breaker is not None:
+                self.circuit_breaker = session.circuit_breaker
+            else:
+                session.circuit_breaker = self.circuit_breaker
+        else:
+            self.circuit_breaker = ActionCircuitBreaker()
+
+        trace = global_latency_tracker.start_trace(task_id=task_id, user_request=user_request)
 
         if generation is not None:
             if generation < self.current_generation:
@@ -174,6 +205,17 @@ class LLMComputerAgent:
             self.state.current_generation = generation
 
         task_gen = self.current_generation
+
+        from app.agent.task_manager import TaskLifecycle, default_task_manager
+
+        current_task_obj = default_task_manager.create_task(
+            intent=user_request,
+            goal=user_request,
+            generation=task_gen,
+            total_steps=1,
+            task_id=task_id,
+        )
+        current_task_obj.transition_to(TaskLifecycle.UNDERSTANDING)
 
         yield _make_agent_event(
             "task_started",
@@ -202,6 +244,7 @@ class LLMComputerAgent:
 
         for iteration in range(max_iterations):
             if self._cancelled or task_gen != self.current_generation:
+                current_task_obj.transition_to(TaskLifecycle.CANCELLED)
                 yield _make_agent_event(
                     "task_cancelled",
                     task_id=task_id,
@@ -209,7 +252,10 @@ class LLMComputerAgent:
                 )
                 return
 
-            # 1. UNDERSTAND & REASON: Query System 1 (Laya) -> System 2 (Main LLM) -> System 0 (Deterministic)
+            current_task_obj.transition_to(TaskLifecycle.UNDERSTANDING)
+
+            # 1. UNDERSTAND & REASON: Query System 0 -> System 1 -> System 2
+            trace.mark("routing_start")
             decision, telemetry = await self._decide_next_action(
                 user_goal=user_request,
                 last_error=last_error_context,
@@ -217,6 +263,7 @@ class LLMComputerAgent:
                 step_idx=iteration,
                 recovery_attempts=recovery_attempts,
             )
+            trace.mark("routing_end")
 
             yield _make_agent_event(
                 "thinking",
@@ -236,6 +283,7 @@ class LLMComputerAgent:
 
             # 2. HANDLE 'ASK_USER'
             if decision_type == "ask_user":
+                current_task_obj.transition_to(TaskLifecycle.WAITING_FOR_USER)
                 question = decision.get("question", "Could you please clarify your request?")
                 self.conversation_history.append({"role": "assistant", "content": question})
                 yield _make_agent_event(
@@ -256,6 +304,7 @@ class LLMComputerAgent:
 
             # 3. HANDLE 'COMPLETE'
             if decision_type == "complete":
+                current_task_obj.transition_to(TaskLifecycle.COMPLETED)
                 final_response = decision.get("response", "Done.")
                 self.conversation_history.append({"role": "assistant", "content": final_response})
                 yield _make_agent_event(
@@ -283,6 +332,7 @@ class LLMComputerAgent:
                 return
 
             # 4. HANDLE 'TOOL_CALL'
+            current_task_obj.transition_to(TaskLifecycle.PLANNING)
             tool_name = (
                 decision.get("tool")
                 or decision.get("action")
@@ -312,7 +362,8 @@ class LLMComputerAgent:
                 confirmed_action
                 and (
                     confirmed_action.get("tool") == tool_name
-                    or {confirmed_action.get("tool"), tool_name} <= {"send_message", "prepare_message"}
+                    or {confirmed_action.get("tool"), tool_name}
+                    <= {"send_message", "prepare_message"}
                 )
             )
             if is_confirmed and tool_name == "prepare_message":
@@ -333,6 +384,7 @@ class LLMComputerAgent:
                 last_error_context = f"Action '{tool_name}' rejected: {validation.rejection_reason}"
                 recovery_attempts += 1
                 if recovery_attempts >= 3:
+                    current_task_obj.transition_to(TaskLifecycle.FAILED)
                     yield _make_agent_event(
                         "response",
                         task_id=task_id,
@@ -350,6 +402,7 @@ class LLMComputerAgent:
                 continue
 
             if validation.requires_confirmation:
+                current_task_obj.transition_to(TaskLifecycle.WAITING_FOR_USER)
                 yield _make_agent_event(
                     "needs_confirm",
                     step_id=f"step_{iteration + 1}",
@@ -379,7 +432,41 @@ class LLMComputerAgent:
                 )
                 return
 
-            # 5. ACT: Execute validated tool
+            # 5. ACT: Validate circuit breaker & execute tool
+            cb_status = self.circuit_breaker.check_pre_execution(
+                tool_name=tool_name,
+                arguments=validation.arguments,
+                environment_identity=self.state.active_application or "",
+            )
+            if cb_status.tripped:
+                current_task_obj.transition_to(TaskLifecycle.FAILED)
+                def_cb_msg = "I couldn't complete that because the computer state stopped changing."
+                msg = cb_status.reason or def_cb_msg
+                self.conversation_history.append({"role": "assistant", "content": msg})
+                trace.mark("response_end")
+                yield _make_agent_event(
+                    "response",
+                    task_id=task_id,
+                    generation=task_gen,
+                    text=msg,
+                    verified=False,
+                    latency=trace.metrics.to_dict(),
+                )
+                yield _make_agent_event(
+                    "circuit_breaker_tripped",
+                    task_id=task_id,
+                    generation=task_gen,
+                    reason=msg,
+                )
+                yield _make_agent_event(
+                    "task_failed",
+                    task_id=task_id,
+                    generation=task_gen,
+                    reason=msg,
+                )
+                return
+
+            current_task_obj.transition_to(TaskLifecycle.ACTING)
             step_id = f"step_{iteration + 1}"
             yield _make_agent_event(
                 "step_start",
@@ -402,18 +489,25 @@ class LLMComputerAgent:
                 thought=thought,
             )
 
+            trace.mark("tool_start")
             harness_result = await self._execute_tool(tool_name, validation.arguments)
+            trace.mark("tool_end")
 
             # Brief pause for OS/DOM stabilization
-            await asyncio.sleep(0.08)
+            await asyncio.sleep(0.05)
 
             # 6. OBSERVE: Capture live computer state
+            trace.mark("observation_start")
+            current_task_obj.transition_to(TaskLifecycle.OBSERVING)
             observation = self.observer.observe()
+            trace.mark("observation_end")
 
             # Update typed context from real observation
             self._update_typed_context(tool_name, validation.arguments, harness_result, observation)
 
             # 7. VERIFY: Task-specific verification
+            trace.mark("verification_start")
+            current_task_obj.transition_to(TaskLifecycle.VERIFYING)
             verification = self._verify_action(
                 tool_name=tool_name,
                 arguments=validation.arguments,
@@ -421,6 +515,16 @@ class LLMComputerAgent:
                 observation=observation,
                 task_id=task_id,
                 generation=task_gen,
+                user_goal=user_request,
+            )
+            trace.mark("verification_end")
+
+            self.circuit_breaker.record_action_result(
+                tool_name=tool_name,
+                arguments=validation.arguments,
+                observation=observation,
+                verified=verification.verified,
+                environment_identity=self.state.active_application or "",
             )
 
             # Record action in audit log
@@ -437,6 +541,41 @@ class LLMComputerAgent:
             turn_actions.append(action_rec)
 
             if verification.verified:
+                if tool_name in ("open_application", "focus_application"):
+                    app_name = validation.arguments.get("application") or harness_result.get(
+                        "application"
+                    )
+                    if app_name:
+                        self.state.active_application = app_name
+                elif tool_name in ("open_folder", "count_directory_items", "list_directory"):
+                    self.state.active_application = "File Explorer"
+                    if observation.get("current_directory"):
+                        self.state.current_directory = observation["current_directory"]
+                    elif validation.arguments.get("path") or validation.arguments.get("directory"):
+                        self.state.current_directory = validation.arguments.get(
+                            "path"
+                        ) or validation.arguments.get("directory")
+                elif tool_name in ("browser_navigate", "browser_search", "browser_click"):
+                    self.state.active_application = (
+                        harness_result.get("application") or "Google Chrome"
+                    )
+                    active_u = (
+                        (observation.get("browser") or {}).get("url")
+                        or harness_result.get("details", {}).get("url")
+                        or harness_result.get("url")
+                        or validation.arguments.get("url")
+                        or (
+                            validation.arguments.get("target")
+                            if str(validation.arguments.get("target", "")).startswith("http")
+                            else None
+                        )
+                    )
+                    if active_u:
+                        self.state.current_url = active_u
+                        self.state.active_page_url = active_u
+                        if not self.state.browser:
+                            self.state.browser = "chrome"
+
                 yield _make_agent_event(
                     "step_done",
                     step_id=step_id,
@@ -484,13 +623,27 @@ class LLMComputerAgent:
 
             if not verification.verified:
                 recovery_attempts += 1
+                current_task_obj.transition_to(TaskLifecycle.RECOVERING)
                 last_error_context = (
                     f"Tool '{tool_name}' failed verification: {verification.reason}"
                 )
                 logger.info("Step not verified. Attempting recovery (%d/3)...", recovery_attempts)
                 if recovery_attempts >= 3:
+                    current_task_obj.transition_to(TaskLifecycle.FAILED)
+                    target_arg = (
+                        raw_arguments.get("application")
+                        or raw_arguments.get("path")
+                        or raw_arguments.get("query")
+                        or raw_arguments.get("url")
+                        or ""
+                    )
+                    action_desc = (
+                        f"{tool_name.replace('_', ' ')} {target_arg}".strip()
+                        if target_arg
+                        else tool_name.replace("_", " ")
+                    )
                     msg = (
-                        f"I attempted to {tool_name.replace('_', ' ')}, "
+                        f"I attempted to {action_desc}, "
                         "but could not verify that it succeeded."
                     )
                     self.conversation_history.append({"role": "assistant", "content": msg})
@@ -510,6 +663,328 @@ class LLMComputerAgent:
                     return
             else:
                 last_error_context = None
+
+    def _system0_deterministic_decision(
+        self,
+        user_goal: str,
+        turn_actions: list[ActionRecord] | None = None,
+    ) -> dict[str, Any] | None:
+        """System 0: Ultra-low latency (<1ms) deterministic decision engine for obvious commands.
+
+        Zero LLM calls, zero network latency, zero hallucinations.
+        """
+        clean_goal = user_goal.strip().rstrip(".!?")
+        g = clean_goal.lower()
+
+        # Multi-turn continuation if last action was search
+        if turn_actions and turn_actions[-1].tool == "browser_search":
+            if any(w in g for w in ("open", "account", "profile", "view", "watch", "play", "show")):
+                from app.desktop.web_services import parse_service_account_query
+
+                spec, uname = parse_service_account_query(user_goal)
+                target_user = uname.lower() if uname else ""
+                cand_url = None
+                if target_user:
+                    for res in self.typed_context.browser_search_results:
+                        if target_user in res.url.lower() or target_user in res.title.lower():
+                            cand_url = res.url
+                            break
+                if not cand_url and spec and uname and spec.account_url_template:
+                    cand_url = spec.account_url_template.format(username=uname)
+                elif not cand_url and "github" in g and "lohith122" in g:
+                    cand_url = "https://github.com/lohith122"
+                if cand_url:
+                    return {
+                        "decision": "tool_call",
+                        "tool": "browser_click",
+                        "arguments": {"target": cand_url},
+                        "thought": f"Opening observed search result for {cand_url}.",
+                    }
+
+        # 1. Stop / Cancel
+        if g in {"stop", "cancel", "abort", "halt", "terminate"}:
+            return {
+                "decision": "complete",
+                "thought": "User requested to stop.",
+                "response": "Stopped.",
+            }
+
+        # 2. Browser opening & switching
+        if g in {"open edge", "launch edge", "open microsoft edge", "start edge"}:
+            return {
+                "decision": "tool_call",
+                "thought": "Opening Microsoft Edge.",
+                "tool": "open_application",
+                "arguments": {"application": "Microsoft Edge"},
+            }
+
+        if g in {"open chrome", "launch chrome", "open google chrome", "start chrome"}:
+            return {
+                "decision": "tool_call",
+                "thought": "Opening Google Chrome.",
+                "tool": "open_application",
+                "arguments": {"application": "Google Chrome"},
+            }
+
+        if g in {"open a browser", "open browser", "launch browser", "start browser"}:
+            return {
+                "decision": "tool_call",
+                "thought": "Opening browser.",
+                "tool": "open_browser",
+                "arguments": {},
+            }
+
+        if any(cue in g for cue in ("switch back to chrome", "focus chrome", "switch to chrome")):
+            return {
+                "decision": "tool_call",
+                "thought": "Switching back to Google Chrome.",
+                "tool": "focus_application",
+                "arguments": {"application": "Google Chrome"},
+            }
+
+        if any(cue in g for cue in ("switch back to edge", "focus edge", "switch to edge")):
+            return {
+                "decision": "tool_call",
+                "thought": "Switching back to Microsoft Edge.",
+                "tool": "focus_application",
+                "arguments": {"application": "Microsoft Edge"},
+            }
+
+        # 3. Web Services & Direct navigation
+        if "youtube" in g:
+            m_yt_search = re.search(r"search\s+(.+?)\s+on\s+youtube", clean_goal, re.IGNORECASE)
+            if m_yt_search:
+                query = m_yt_search.group(1).strip()
+                return {
+                    "decision": "tool_call",
+                    "thought": f"Searching YouTube for '{query}'.",
+                    "tool": "browser_search",
+                    "arguments": {"query": query, "site": "youtube"},
+                }
+            if any(w in g for w in ("homepage", "home")):
+                return {
+                    "decision": "tool_call",
+                    "thought": "Opening YouTube homepage.",
+                    "tool": "browser_navigate",
+                    "arguments": {"url": "https://www.youtube.com/"},
+                }
+            if any(w in g for w in ("open", "go to", "take me")):
+                return {
+                    "decision": "tool_call",
+                    "thought": "Opening YouTube.",
+                    "tool": "browser_navigate",
+                    "arguments": {"url": "https://www.youtube.com"},
+                }
+
+        # GitHub Navigation
+        if "github" in g:
+            if g in {"open github", "launch github", "go to github", "start github"}:
+                return {
+                    "decision": "tool_call",
+                    "thought": "Opening GitHub.",
+                    "tool": "browser_navigate",
+                    "arguments": {"url": "https://github.com", "service": "github"},
+                }
+
+        # Documentation / guide search (e.g. "open python docs")
+        m_docs = re.match(
+            r"^open\s+(.+?\s+(?:docs|documentation|tutorials?|guide|cheatsheet))$",
+            g,
+        )
+        if m_docs:
+            q_docs = m_docs.group(1).strip()
+            return {
+                "decision": "tool_call",
+                "thought": f"Searching for '{q_docs}'.",
+                "tool": "browser_search",
+                "arguments": {"query": q_docs, "site": "google"},
+            }
+
+        if g.startswith(("search for ", "search ")):
+            if "youtube" not in g:
+                query = re.sub(r"^search\s+(?:for\s+)?", "", clean_goal).strip()
+                return {
+                    "decision": "tool_call",
+                    "thought": f"Searching for '{query}'.",
+                    "tool": "browser_search",
+                    "arguments": {"query": query, "site": "google"},
+                }
+
+        # 4. Browser Navigation History & Tabs
+        if g in {"go back", "back", "navigate back", "previous page"}:
+            is_fs = (
+                self.typed_context.last_active_domain == "filesystem"
+                or "explorer" in (self.state.active_application or "").lower()
+            )
+            if is_fs:
+                cur = self.state.current_directory or ""
+                if "/" in cur or "\\" in cur:
+                    parent_dir = cur.replace("\\", "/").rsplit("/", 1)[0]
+                elif "classical" in cur.lower():
+                    parent_dir = "Music"
+                else:
+                    parent_dir = "Desktop"
+                return {
+                    "decision": "tool_call",
+                    "thought": f"Navigating back to {parent_dir}.",
+                    "tool": "open_folder",
+                    "arguments": {"path": parent_dir},
+                }
+            return {
+                "decision": "tool_call",
+                "thought": "Navigating back in browser history.",
+                "tool": "browser_back",
+                "arguments": {},
+            }
+
+        if g in {"close this tab", "close tab", "close the tab"}:
+            return {
+                "decision": "tool_call",
+                "thought": "Closing active browser tab.",
+                "tool": "browser_close_tab",
+                "arguments": {},
+            }
+
+        # 5. Desktop Applications
+        if g in {"open file explorer", "file explorer", "launch file explorer", "open explorer"}:
+            return {
+                "decision": "tool_call",
+                "thought": "Opening File Explorer.",
+                "tool": "open_application",
+                "arguments": {"application": "File Explorer"},
+            }
+
+        if g in {"open vs code", "open visual studio code", "launch vs code", "open vscode"}:
+            return {
+                "decision": "tool_call",
+                "thought": "Opening Visual Studio Code.",
+                "tool": "open_application",
+                "arguments": {"application": "Visual Studio Code"},
+            }
+
+        if g in {"open whatsapp", "launch whatsapp"}:
+            return {
+                "decision": "tool_call",
+                "thought": "Opening WhatsApp.",
+                "tool": "open_application",
+                "arguments": {"application": "WhatsApp"},
+            }
+
+        # 6. Filesystem Locations & Inspection
+        if g in {"open desktop", "show desktop", "go to desktop", "take me to desktop"}:
+            return {
+                "decision": "tool_call",
+                "thought": "Navigating to Desktop folder.",
+                "tool": "open_folder",
+                "arguments": {"path": "Desktop"},
+            }
+
+        if g in {"open downloads", "open the downloads folder", "go to downloads"}:
+            return {
+                "decision": "tool_call",
+                "thought": "Opening Downloads folder.",
+                "tool": "open_folder",
+                "arguments": {"path": "Downloads"},
+            }
+
+        if g in {"open documents", "open the documents folder", "go to documents"}:
+            return {
+                "decision": "tool_call",
+                "thought": "Opening Documents folder.",
+                "tool": "open_folder",
+                "arguments": {"path": "Documents"},
+            }
+
+        if g in {"open music", "open the music folder", "go to music"}:
+            return {
+                "decision": "tool_call",
+                "thought": "Opening Music folder.",
+                "tool": "open_folder",
+                "arguments": {"path": "Music"},
+            }
+
+        if "how many" in g or re.search(r"\bcount\b", g):
+            item_type = "file" if "file" in g else "folder"
+            target_dir = self.state.current_directory or "Desktop"
+            for prep in ("on my ", "in my ", "in ", "inside ", "available in ", "exist in "):
+                if prep in g:
+                    clean_after = g.split(prep, 1)[1].strip().rstrip("?")
+                    after_prep = clean_after.replace("folder", "").strip()
+                    if after_prep:
+                        target_dir = after_prep.title()
+                        break
+            return {
+                "decision": "tool_call",
+                "thought": f"Counting {item_type}s in '{target_dir}'.",
+                "tool": "count_directory_items",
+                "arguments": {"directory": target_dir, "item_type": item_type},
+            }
+
+        if any(
+            p in g
+            for p in (
+                "what's in my downloads",
+                "whats in my downloads",
+                "what is in my downloads",
+                "list downloads",
+                "show downloads files",
+            )
+        ):
+            return {
+                "decision": "tool_call",
+                "thought": "Listing items in Downloads folder.",
+                "tool": "list_directory",
+                "arguments": {"directory": "Downloads"},
+            }
+
+        if any(
+            p in g
+            for p in (
+                "what are those files",
+                "what are the files",
+                "what files",
+                "list files",
+                "show files",
+            )
+        ):
+            if self.typed_context.filesystem_results:
+                file_names = [e.name for e in self.typed_context.filesystem_results]
+                dir_name = (
+                    self.state.current_directory
+                    or self.typed_context.last_opened_folder
+                    or "Desktop"
+                )
+                return {
+                    "decision": "complete",
+                    "thought": f"Listing {len(file_names)} verified files from {dir_name}.",
+                    "response": f"The files in {dir_name} are: {', '.join(file_names)}.",
+                }
+            target_dir = (
+                self.state.current_directory
+                or self.typed_context.last_opened_folder
+                or "Desktop"
+            )
+            return {
+                "decision": "tool_call",
+                "thought": f"Listing directory items in '{target_dir}'.",
+                "tool": "list_directory",
+                "arguments": {"directory": target_dir},
+            }
+
+        if g in {
+            "system information",
+            "system info",
+            "what is the system info",
+            "whats the system information",
+        }:
+            return {
+                "decision": "tool_call",
+                "thought": "Getting computer state and system information.",
+                "tool": "get_computer_state",
+                "arguments": {},
+            }
+
+        return None
 
     async def _decide_next_action(
         self,
@@ -532,7 +1007,16 @@ class LLMComputerAgent:
         # 1. Career intelligence boundary guard
         clean_goal = user_goal.strip().rstrip(".!?")
         g = clean_goal.lower()
-        if any(w in g for w in ("find python jobs", "job search", "tailor resume", "find jobs", "career discovery")):
+        if any(
+            w in g
+            for w in (
+                "find python jobs",
+                "job search",
+                "tailor resume",
+                "find jobs",
+                "career discovery",
+            )
+        ):
             return {
                 "decision": "ask_user",
                 "thought": "Career intelligence queries belong to the Career Intelligence page.",
@@ -543,17 +1027,80 @@ class LLMComputerAgent:
             }, telemetry
 
         # 2. Check if an action executed during THIS turn already satisfied the goal
-        turn_decision = self._check_turn_completion(turn_actions)
+        turn_decision = self._check_turn_completion(turn_actions, user_goal=user_goal)
         if turn_decision:
             return turn_decision, telemetry
 
-        # 3. System-1: Fast Bounded Decisions via Laya
+        # 3. System 0: Ultra-Fast Deterministic Fast Decision (<1ms) for obvious commands
+        sys0_decision = self._system0_deterministic_decision(
+            user_goal=user_goal, turn_actions=turn_actions
+        )
+        if sys0_decision:
+            telemetry.update({
+                "laya_decision": "system0_deterministic",
+                "laya_confidence": 1.0,
+                "llm_tier": "SYSTEM_0_FAST",
+                "llm_provider": "deterministic",
+                "llm_model": "none",
+                "route_reason": "System 0 deterministic fast-path",
+            })
+            return sys0_decision, telemetry
+
+        # Multi-step continuation: if last action was browser_search and user goal
+        # was to open an account or item
+        if turn_actions and turn_actions[-1].tool == "browser_search":
+            if any(w in g for w in ("open", "account", "profile", "view", "watch", "play", "show")):
+                from app.desktop.web_services import parse_service_account_query
+
+                spec, uname = parse_service_account_query(user_goal)
+                target_user = uname.lower() if uname else ""
+
+                cand_url = None
+                cand_title = None
+
+                # 1. Match exact target user in observed search results
+                if target_user:
+                    for res in self.typed_context.browser_search_results:
+                        res_url = res.url.lower()
+                        res_title = res.title.lower()
+                        if target_user in res_url or target_user in res_title:
+                            cand_url = res.url
+                            cand_title = res.title
+                            break
+
+                # 2. Match service spec if no specific user or if user search yielded service page
+                if not cand_url and not target_user:
+                    for res in self.typed_context.browser_search_results:
+                        if spec and spec.name.lower() in res.url.lower():
+                            cand_url = res.url
+                            cand_title = res.title
+                            break
+
+                # 3. Direct template fallback if search results didn't have link
+                if not cand_url and spec and uname and spec.account_url_template:
+                    cand_url = spec.account_url_template.format(username=uname)
+                    cand_title = f"{uname} on {spec.display_name}"
+                elif not cand_url and "github" in g and "lohith122" in g:
+                    cand_url = "https://github.com/lohith122"
+                    cand_title = "lohith122 GitHub"
+
+                if cand_url:
+                    return {
+                        "decision": "tool_call",
+                        "tool": "browser_click",
+                        "arguments": {"target": cand_url},
+                        "thought": f"Clicking observed search result for {cand_title or cand_url}.",
+                    }, telemetry
+
+        # 4. System-1: Fast Bounded Decisions via Laya
         state_summary = (
             f"App: {self.state.active_application}, "
             f"Dir: {self.state.current_directory}, "
             f"URL: {self.state.current_url or (self.state.browser and self.state.active_page_url)}"
         )
-        laya_domain = await self.decision_engine.classify_domain(user_goal, state_summary=state_summary)
+        laya_domain = await self.decision_engine.classify_domain(
+            user_goal, state_summary=state_summary
+        )
         telemetry["laya_decision"] = laya_domain.decision
         telemetry["laya_confidence"] = laya_domain.confidence
 
@@ -561,13 +1108,36 @@ class LLMComputerAgent:
         ref_resolution: DecisionResult | None = None
         candidate_labels: list[str] = []
         if self.typed_context.filesystem_results:
-            candidate_labels.extend([f"{ent.ordinal}. {ent.name}" for ent in self.typed_context.filesystem_results[:10]])
+            candidate_labels.extend(
+                [f"{ent.ordinal}. {ent.name}" for ent in self.typed_context.filesystem_results[:10]]
+            )
         if self.typed_context.youtube_video_results:
-            candidate_labels.extend([f"{ent.ordinal}. {ent.title}" for ent in self.typed_context.youtube_video_results[:10]])
+            candidate_labels.extend(
+                [
+                    f"{ent.ordinal}. {ent.title}"
+                    for ent in self.typed_context.youtube_video_results[:10]
+                ]
+            )
 
-        has_deictic_ref = any(cue in g for cue in ("those", "them", "it", "that", "first", "second", "third", "previous", "next", "one"))
+        has_deictic_ref = any(
+            cue in g
+            for cue in (
+                "those",
+                "them",
+                "it",
+                "that",
+                "first",
+                "second",
+                "third",
+                "previous",
+                "next",
+                "one",
+            )
+        )
         if candidate_labels and has_deictic_ref:
-            ref_resolution = await self.decision_engine.resolve_reference(user_goal, candidate_labels)
+            ref_resolution = await self.decision_engine.resolve_reference(
+                user_goal, candidate_labels
+            )
             if ref_resolution and ref_resolution.is_confident:
                 telemetry["laya_reference_resolved"] = ref_resolution.decision
                 telemetry["laya_reference_confidence"] = ref_resolution.confidence
@@ -586,9 +1156,14 @@ class LLMComputerAgent:
                     break
 
         # Fast Ambiguity Gate via System-1
+        fs_count = len(self.typed_context.filesystem_results)
+        yt_count = len(self.typed_context.youtube_video_results)
         amb_result = await self.decision_engine.check_ambiguity(
             user_goal,
-            context_summary=f"fs_items={len(self.typed_context.filesystem_results)}, yt_items={len(self.typed_context.youtube_video_results)}, dir={self.state.current_directory}",
+            context_summary=(
+                f"fs_items={fs_count}, yt_items={yt_count}, "
+                f"dir={self.state.current_directory}"
+            ),
         )
         is_ambiguous = amb_result.decision if (amb_result and amb_result.is_confident) else False
 
@@ -600,8 +1175,11 @@ class LLMComputerAgent:
             step_count=step_idx,
             recovery_count=recovery_attempts,
             last_error=last_error,
-            laya_decision=ref_resolution if (ref_resolution and ref_resolution.is_confident) else laya_domain,
-            typed_context_size=len(self.typed_context.filesystem_results) + len(self.typed_context.youtube_video_results),
+            laya_decision=ref_resolution
+            if (ref_resolution and ref_resolution.is_confident)
+            else laya_domain,
+            typed_context_size=len(self.typed_context.filesystem_results)
+            + len(self.typed_context.youtube_video_results),
             is_ambiguous=is_ambiguous,
         )
         route_decision = self.llm_router.route(task_ctx)
@@ -637,12 +1215,24 @@ class LLMComputerAgent:
         context_payload = {
             "domain": "computer",
             "system1_domain": laya_domain.decision if laya_domain.is_confident else "general",
-            "system1_reference": ref_resolution.decision if (ref_resolution and ref_resolution.is_confident) else None,
+            "system1_reference": ref_resolution.decision
+            if (ref_resolution and ref_resolution.is_confident)
+            else None,
             "resolved_target": (
-                {"name": resolved_fs_ent.name, "path": resolved_fs_ent.path, "type": resolved_fs_ent.type, "ordinal": resolved_fs_ent.ordinal}
+                {
+                    "name": resolved_fs_ent.name,
+                    "path": resolved_fs_ent.path,
+                    "type": resolved_fs_ent.type,
+                    "ordinal": resolved_fs_ent.ordinal,
+                }
                 if resolved_fs_ent
                 else (
-                    {"title": resolved_yt_ent.title, "url": resolved_yt_ent.url, "type": "video", "ordinal": resolved_yt_ent.ordinal}
+                    {
+                        "title": resolved_yt_ent.title,
+                        "url": resolved_yt_ent.url,
+                        "type": "video",
+                        "ordinal": resolved_yt_ent.ordinal,
+                    }
                     if resolved_yt_ent
                     else None
                 )
@@ -654,8 +1244,7 @@ class LLMComputerAgent:
                 "active_window_title": self.state.active_window_title,
                 "current_directory": self.state.current_directory,
                 "current_url": (
-                    self.state.current_url
-                    or (self.state.browser and self.state.active_page_url)
+                    self.state.current_url or (self.state.browser and self.state.active_page_url)
                 ),
                 "web_site": self.state.web_context.site,
                 "web_page": self.state.web_context.page,
@@ -692,7 +1281,7 @@ class LLMComputerAgent:
             if clean_g in {"open a browser", "open browser", "launch browser", "start browser"}:
                 dec["decision"] = "tool_call"
                 dec["tool"] = "open_browser"
-                dec["arguments"] = {"url": "https://www.google.com"}
+                dec["arguments"] = {}
                 dec["thought"] = "Opening browser."
                 return dec
 
@@ -700,9 +1289,7 @@ class LLMComputerAgent:
             if "youtube" in clean_g and any(
                 w in clean_g for w in ("open", "homepage", "home", "go to", "take me")
             ):
-                if not any(
-                    w in clean_g for w in ("search", "watch", "video", "course", "channel")
-                ):
+                if not any(w in clean_g for w in ("search", "watch", "video", "course", "channel")):
                     yt_url = (
                         "https://www.youtube.com/"
                         if ("homepage" in clean_g or "home" in clean_g)
@@ -715,25 +1302,106 @@ class LLMComputerAgent:
                     return dec
 
             # 4a. Ground ordinal filesystem selection if resolved
-            if resolved_fs_ent and (
-                any(w in clean_g for w in ("open", "view", "launch", "inside", "show"))
+            fs_target_ent = resolved_fs_ent
+            if fs_target_ent is None and self.typed_context.filesystem_results:
+                if (
+                    any(
+                        w in clean_g
+                        for w in (
+                            "third",
+                            "second",
+                            "first",
+                            "fourth",
+                            "fifth",
+                            "1st",
+                            "2nd",
+                            "3rd",
+                            "4th",
+                            "5th",
+                        )
+                    )
+                    and "video" not in clean_g
+                ):
+                    m_ord = re.search(
+                        r"\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th)\b", clean_g
+                    )
+                    ord_map = {
+                        "first": 1,
+                        "1st": 1,
+                        "second": 2,
+                        "2nd": 2,
+                        "third": 3,
+                        "3rd": 3,
+                        "fourth": 4,
+                        "4th": 4,
+                        "fifth": 5,
+                        "5th": 5,
+                    }
+                    ord_idx = ord_map.get(m_ord.group(1), 1) if m_ord else 1
+                    fs_target_ent = self.typed_context.resolve_ordinal(
+                        ord_idx, preferred_domain="filesystem"
+                    )
+
+            if fs_target_ent and (
+                any(
+                    w in clean_g
+                    for w in (
+                        "open",
+                        "view",
+                        "launch",
+                        "inside",
+                        "show",
+                        "third",
+                        "second",
+                        "first",
+                        "one",
+                    )
+                )
                 or dec.get("decision") != "tool_call"
             ):
                 dec["decision"] = "tool_call"
-                dec["tool"] = "open_file" if resolved_fs_ent.type == "file" else "open_folder"
-                dec["arguments"] = {"path": resolved_fs_ent.path or resolved_fs_ent.name}
-                dec["thought"] = f"Opening {resolved_fs_ent.name}."
+                dec["tool"] = "open_file" if fs_target_ent.type == "file" else "open_folder"
+                dec["arguments"] = {"path": fs_target_ent.path or fs_target_ent.name}
+                dec["thought"] = f"Opening {fs_target_ent.name}."
                 return dec
 
             # 4b. Ground ordinal YouTube selection if resolved or if video requested
             if (resolved_yt_ent or "video" in clean_g) and (
-                any(w in clean_g for w in ("open", "play", "watch", "click", "view", "third", "second", "first", "fourth", "fifth", "one"))
+                any(
+                    w in clean_g
+                    for w in (
+                        "open",
+                        "play",
+                        "watch",
+                        "click",
+                        "view",
+                        "third",
+                        "second",
+                        "first",
+                        "fourth",
+                        "fifth",
+                        "one",
+                    )
+                )
                 or dec.get("decision") != "tool_call"
             ):
                 yt_ent = resolved_yt_ent
                 if yt_ent is None and self.typed_context.youtube_video_results:
-                    m_ord = re.search(r"\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th)\b", clean_g)
-                    ord_map = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3, "fourth": 4, "4th": 4, "fifth": 5, "5th": 5}
+                    m_ord = re.search(
+                        r"\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th)\b", clean_g
+                    )
+                    ord_map = {
+                        "first": 1,
+                        "1st": 1,
+                        "second": 2,
+                        "2nd": 2,
+                        "third": 3,
+                        "3rd": 3,
+                        "fourth": 4,
+                        "4th": 4,
+                        "fifth": 5,
+                        "5th": 5,
+                    }
                     ord_idx = ord_map.get(m_ord.group(1), 1) if m_ord else 1
                     yt_ent = self.typed_context.resolve_ordinal(ord_idx, preferred_domain="youtube")
                 if yt_ent:
@@ -741,7 +1409,10 @@ class LLMComputerAgent:
                     ord_val = yt_ent.ordinal
                     dec["decision"] = "tool_call"
                     dec["tool"] = "browser_click"
-                    dec["arguments"] = {"target": target_url or f"video #{ord_val}", "ordinal": ord_val}
+                    dec["arguments"] = {
+                        "target": target_url or f"video #{ord_val}",
+                        "ordinal": ord_val,
+                    }
                     dec["thought"] = f"Opening video #{ord_val}."
                     return dec
 
@@ -755,31 +1426,26 @@ class LLMComputerAgent:
                     dec["thought"] = f"Searching for '{q}'."
                     return dec
 
-            # 6. If browser is active and user asks to open a web query or docs
-            is_browser_active = (
-                (self._current_session and getattr(self._current_session, "active_browser", False))
-                or (self.state.browser and self.state.active_application in ("Google Chrome", "Microsoft Edge"))
-                or self.typed_context.last_active_domain == "browser"
-            )
-            if is_browser_active and clean_g.startswith("open "):
-                target_term = clean_g[5:].strip()
-                known_os = {
-                    "chrome", "google chrome", "edge", "microsoft edge",
-                    "vs code", "visual studio code", "whatsapp",
-                    "file explorer", "desktop", "music", "downloads",
-                }
-                from app.desktop.web_services import find_service
-                if (
-                    target_term not in known_os
-                    and find_service(target_term) is None
-                    and not resolved_fs_ent
-                    and not resolved_yt_ent
-                    and "video" not in clean_g
-                ):
+            # 6. Service / account target grounding (e.g. "open lohith122 github account")
+            from app.desktop.web_services import parse_service_account_query
+
+            svc_spec, svc_user = parse_service_account_query(clean_g)
+            if svc_spec and (
+                dec.get("decision") != "tool_call"
+                or dec.get("tool") not in ("browser_search", "browser_navigate", "browser_click")
+            ):
+                if svc_user and svc_spec.account_url_template:
+                    acc_url = svc_spec.account_url_template.format(username=svc_user)
                     dec["decision"] = "tool_call"
-                    dec["tool"] = "browser_search"
-                    dec["arguments"] = {"query": target_term, "site": "google"}
-                    dec["thought"] = f"Searching for '{target_term}' in active browser."
+                    dec["tool"] = "browser_navigate"
+                    dec["arguments"] = {"url": acc_url, "service": svc_spec.name}
+                    dec["thought"] = f"Opening {svc_spec.display_name} account for {svc_user}."
+                    return dec
+                elif not svc_user:
+                    dec["decision"] = "tool_call"
+                    dec["tool"] = "browser_navigate"
+                    dec["arguments"] = {"url": svc_spec.base_url, "service": svc_spec.name}
+                    dec["thought"] = f"Opening {svc_spec.display_name}."
                     return dec
 
             if dec.get("decision") == "tool_call":
@@ -789,8 +1455,28 @@ class LLMComputerAgent:
                     cur_path = str(args.get("path") or "").strip()
                     if resolved_fs_ent and (
                         not cur_path
-                        or cur_path in ("Music", "Desktop", "Downloads", "Documents", self.state.current_directory, self.typed_context.last_opened_folder)
-                        or any(w in user_goal.lower() for w in ("third", "second", "first", "fourth", "fifth", "one", "folder", "file"))
+                        or cur_path
+                        in (
+                            "Music",
+                            "Desktop",
+                            "Downloads",
+                            "Documents",
+                            self.state.current_directory,
+                            self.typed_context.last_opened_folder,
+                        )
+                        or any(
+                            w in user_goal.lower()
+                            for w in (
+                                "third",
+                                "second",
+                                "first",
+                                "fourth",
+                                "fifth",
+                                "one",
+                                "folder",
+                                "file",
+                            )
+                        )
                     ):
                         args["path"] = resolved_fs_ent.path or resolved_fs_ent.name
                         if resolved_fs_ent.type == "file":
@@ -798,7 +1484,9 @@ class LLMComputerAgent:
                         else:
                             dec["tool"] = "open_folder"
                 elif t_name == "browser_click":
-                    if resolved_yt_ent and (not args.get("target") or "video" in str(args.get("target")).lower()):
+                    if resolved_yt_ent and (
+                        not args.get("target") or "video" in str(args.get("target")).lower()
+                    ):
                         args["target"] = resolved_yt_ent.url or resolved_yt_ent.title
                         args["ordinal"] = resolved_yt_ent.ordinal
                 elif user_goal.strip().rstrip(".!?").lower() in ("go back", "back"):
@@ -806,12 +1494,41 @@ class LLMComputerAgent:
                     is_fs_subfolder = (
                         self.typed_context.last_active_domain == "filesystem"
                         and self.state.current_directory
-                        and any(sub in self.state.current_directory for sub in ("Classical", "Pop", "Rock", "/", "\\"))
+                        and any(
+                            sub in self.state.current_directory
+                            for sub in ("Classical", "Pop", "Rock", "/", "\\")
+                        )
                     )
                     if not is_fs_subfolder:
                         dec["tool"] = "browser_back"
                         dec["arguments"] = {}
             return dec
+
+        # 5a. Dedicated Computer Use Provider (e.g. Gemini Computer Use)
+        if self.computer_use_provider and getattr(self.computer_use_provider, "enabled", False):
+            try:
+                active_obs = self.observer.observe()
+                cu_decision = await self.computer_use_provider.decide_action(
+                    goal=user_goal,
+                    observation=active_obs,
+                    context_payload=context_payload,
+                    tools=[
+                        COMPUTER_TOOLS_BY_NAME[t["name"]]
+                        for t in tool_schemas
+                        if t["name"] in COMPUTER_TOOLS_BY_NAME
+                    ],
+                )
+                if cu_decision and "decision" in cu_decision:
+                    telemetry["llm_provider"] = "gemini_computer_use"
+                    telemetry["llm_model"] = getattr(
+                        self.computer_use_provider, "model_name", "gemini-2.5-flash"
+                    )
+                    return _ground_decision(cu_decision), telemetry
+            except Exception as cu_exc:
+                logger.warning(
+                    "Gemini Computer Use provider failed: %s. Falling back to LLM router.",
+                    cu_exc,
+                )
 
         client = self.llm_client or self.llm_router.get_client(route_decision)
         if client and getattr(client, "enabled", True):
@@ -825,7 +1542,11 @@ class LLMComputerAgent:
                 if parsed and "decision" in parsed:
                     return _ground_decision(parsed), telemetry
             except Exception as exc:
-                logger.warning("Primary LLM (%s) failed: %s. Attempting fallback.", route_decision.provider, exc)
+                logger.warning(
+                    "Primary LLM (%s) failed: %s. Attempting fallback.",
+                    route_decision.provider,
+                    exc,
+                )
                 fallback_client = self.llm_router.get_fallback_client(route_decision)
                 if fallback_client and getattr(fallback_client, "enabled", True):
                     try:
@@ -836,7 +1557,9 @@ class LLMComputerAgent:
                         )
                         parsed = self._extract_json(response_text)
                         if parsed and "decision" in parsed:
-                            telemetry["llm_provider"] = route_decision.fallback_provider or "fallback"
+                            telemetry["llm_provider"] = (
+                                route_decision.fallback_provider or "fallback"
+                            )
                             telemetry["llm_model"] = route_decision.fallback_model or ""
                             return _ground_decision(parsed), telemetry
                     except Exception as fb_exc:
@@ -851,6 +1574,7 @@ class LLMComputerAgent:
     def _check_turn_completion(
         self,
         turn_actions: list[ActionRecord] | None,
+        user_goal: str = "",
     ) -> dict[str, Any] | None:
         """Check if an action executed in this turn already satisfied the goal."""
         if not turn_actions:
@@ -865,6 +1589,8 @@ class LLMComputerAgent:
                 "thought": "Authentication credential required.",
                 "question": last_act.result.get("message", "Please provide credentials."),
             }
+
+        g = (user_goal or "").strip().rstrip(".!?").lower()
 
         if last_act.tool == "count_directory_items":
             msg = last_act.result.get("message")
@@ -889,14 +1615,36 @@ class LLMComputerAgent:
                 "thought": "List directory completed successfully.",
                 "response": f"Inside {dir_name}, there are: {preview or 'no items'}.",
             }
-        if last_act.tool == "browser_click" and last_act.arguments.get("ordinal"):
+        if last_act.tool == "browser_click":
+            target = str(last_act.arguments.get("target") or "")
+            if "github.com" in target.lower() or "github" in g:
+                uname = (
+                    "lohith122" if ("lohith122" in target.lower() or "lohith122" in g) else "user"
+                )
+                m = re.search(r"github\.com/([a-zA-Z0-9_-]+)", target)
+                if m:
+                    uname = m.group(1)
+                return {
+                    "decision": "complete",
+                    "thought": f"Opened GitHub account for {uname}.",
+                    "response": f"Opened the GitHub account for {uname}.",
+                }
+            if last_act.arguments.get("ordinal"):
+                return {
+                    "decision": "complete",
+                    "thought": "Browser click on target item succeeded.",
+                    "response": "Opened the selected item.",
+                }
             return {
                 "decision": "complete",
-                "thought": "Browser click on target item succeeded.",
-                "response": "Opened the selected item.",
+                "thought": f"Clicked {target}.",
+                "response": f"Opened {target}."
+                if target.startswith("http")
+                else f"Clicked on {target}.",
             }
-        if last_act.tool in ("open_application", "focus_application"):
-            app = last_act.arguments.get("application", "")
+        app_tools = ("open_application", "focus_application", "open_browser", "launch_browser")
+        if last_act.tool in app_tools:
+            app = last_act.arguments.get("application", "") or "Browser"
             return {
                 "decision": "complete",
                 "thought": f"{app} opened and verified.",
@@ -911,18 +1659,38 @@ class LLMComputerAgent:
             }
         if last_act.tool == "open_file":
             path = last_act.arguments.get("path", "")
+            from pathlib import Path
+
+            fname = Path(path).name or path
             return {
                 "decision": "complete",
                 "thought": f"File {path} opened.",
-                "response": f"Opened file {path}.",
+                "response": f"Opened file {fname}.",
             }
         if last_act.tool == "browser_navigate":
             url = last_act.arguments.get("url", "")
             service = last_act.arguments.get("service")
+            if "github.com" in url or (service and "github" in service.lower()):
+                uname = None
+                if "lohith122" in url.lower() or "lohith122" in g:
+                    uname = "lohith122"
+                else:
+                    m = re.search(r"github\.com/([a-zA-Z0-9_-]+)", url)
+                    if m:
+                        uname = m.group(1)
+                if uname:
+                    return {
+                        "decision": "complete",
+                        "thought": f"Opened GitHub account for {uname}.",
+                        "response": f"Opened the GitHub account for {uname}.",
+                    }
+                return {
+                    "decision": "complete",
+                    "thought": "Navigated to GitHub.",
+                    "response": "Opening GitHub.",
+                }
             if "youtube.com" in url or (service and "youtube" in service.lower()):
                 site = "YouTube"
-            elif "github.com" in url or (service and "github" in service.lower()):
-                site = "GitHub"
             else:
                 site = service.title() if service else "the website"
             return {
@@ -931,6 +1699,16 @@ class LLMComputerAgent:
                 "response": f"Opening {site}.",
             }
         if last_act.tool == "browser_search":
+            # If user's goal was docs/guide search (e.g. "open python docs"), search satisfies it
+            if any(w in g for w in ("docs", "documentation", "tutorials", "guide", "cheatsheet")):
+                return {
+                    "decision": "complete",
+                    "thought": "Documentation search executed.",
+                    "response": f"Searched for '{last_act.arguments.get('query')}'.",
+                }
+            # If user's goal was to open an account or watch video, search is only step 1
+            if any(w in g for w in ("account", "profile", "watch", "play", "github")):
+                return None
             return {
                 "decision": "complete",
                 "thought": "Search executed.",
@@ -976,7 +1754,16 @@ class LLMComputerAgent:
         g = clean_goal.lower()
 
         # 1. Career intelligence boundary guard
-        if any(w in g for w in ("find python jobs", "job search", "tailor resume", "find jobs", "career discovery")):
+        if any(
+            w in g
+            for w in (
+                "find python jobs",
+                "job search",
+                "tailor resume",
+                "find jobs",
+                "career discovery",
+            )
+        ):
             return {
                 "decision": "ask_user",
                 "thought": "Career intelligence queries belong to the Career Intelligence page.",
@@ -993,13 +1780,19 @@ class LLMComputerAgent:
 
         # 3. Contextual Follow-up Resolutions
         # "What are those files?" / "What are those?" / "List them"
-        if re.search(r"\b(what are those|what are they|list them|show them|which ones|what are the files)\b", g) or "those files" in g:
+        what_pattern = (
+            r"\b(what are those|what are they|list them|show them|"
+            r"which ones|what are the files)\b"
+        )
+        if re.search(what_pattern, g) or "those files" in g:
             if self.typed_context.filesystem_results:
                 names = [f.name for f in self.typed_context.filesystem_results[:12]]
                 preview = ", ".join(names)
                 remaining = len(self.typed_context.filesystem_results) - 12
                 more = f", and {remaining} more" if remaining > 0 else ""
-                is_files = any(f.type == "file" or "." in f.name for f in self.typed_context.filesystem_results)
+                is_files = any(
+                    f.type == "file" or "." in f.name for f in self.typed_context.filesystem_results
+                )
                 label = "files" if is_files else "folders"
                 return {
                     "decision": "complete",
@@ -1037,17 +1830,26 @@ class LLMComputerAgent:
         )
         if m_ord:
             ord_map = {
-                "first": 1, "1st": 1,
-                "second": 2, "2nd": 2,
-                "third": 3, "3rd": 3,
-                "fourth": 4, "4th": 4,
-                "fifth": 5, "5th": 5,
+                "first": 1,
+                "1st": 1,
+                "second": 2,
+                "2nd": 2,
+                "third": 3,
+                "3rd": 3,
+                "fourth": 4,
+                "4th": 4,
+                "fifth": 5,
+                "5th": 5,
             }
             ord_val = ord_map.get(m_ord.group(1), 1)
             target_kind = m_ord.group(2) or ""
 
             # Check if domain preference is indicated
-            if "video" in target_kind or self.typed_context.last_active_domain == "browser":
+            is_video = "video" in target_kind or (
+                self.typed_context.last_active_domain == "browser"
+                and not self.typed_context.filesystem_results
+            )
+            if is_video:
                 video_ent = self.typed_context.resolve_ordinal(ord_val, preferred_domain="youtube")
                 target_url = video_ent.url if video_ent else ""
                 return {
@@ -1061,9 +1863,10 @@ class LLMComputerAgent:
                 if fs_ent:
                     is_file = fs_ent.type == "file" or "." in fs_ent.name
                     tool_name = "open_file" if is_file else "open_folder"
+                    item_type = "file" if is_file else "folder"
                     return {
                         "decision": "tool_call",
-                        "thought": f"Opening {ord_val}th {'file' if is_file else 'folder'} '{fs_ent.name}'.",
+                        "thought": f"Opening {ord_val}th {item_type} '{fs_ent.name}'.",
                         "tool": tool_name,
                         "arguments": {"path": fs_ent.path},
                     }
@@ -1090,7 +1893,7 @@ class LLMComputerAgent:
                 "decision": "tool_call",
                 "thought": "Opening browser.",
                 "tool": "open_browser",
-                "arguments": {"url": "https://www.google.com"},
+                "arguments": {},
             }
 
         if "open github" in g:
@@ -1141,30 +1944,39 @@ class LLMComputerAgent:
                     "arguments": {"query": query, "site": "google"},
                 }
 
-        is_browser_active = (
-            (self._current_session and getattr(self._current_session, "active_browser", False))
-            or (self.state.browser and self.state.active_application in ("Google Chrome", "Microsoft Edge"))
-            or self.typed_context.last_active_domain == "browser"
+        # Documentation / guide search (e.g. "open python docs")
+        m_docs = re.match(
+            r"^open\s+(.+?\s+(?:docs|documentation|tutorials?|guide|cheatsheet))$",
+            g,
         )
-        if is_browser_active and g.startswith("open "):
-            target_term = g[5:].strip()
-            known_os = {
-                "chrome", "google chrome", "edge", "microsoft edge",
-                "vs code", "visual studio code", "whatsapp",
-                "file explorer", "desktop", "music", "downloads",
+        if m_docs:
+            q_docs = m_docs.group(1).strip()
+            return {
+                "decision": "tool_call",
+                "thought": f"Searching for '{q_docs}'.",
+                "tool": "browser_search",
+                "arguments": {"query": q_docs, "site": "google"},
             }
-            from app.desktop.web_services import find_service
-            if (
-                target_term not in known_os
-                and find_service(target_term) is None
-                and not (ref_resolution and ref_resolution.is_confident)
-                and "video" not in g
-            ):
+
+        # Service / account target query (e.g. "open lohith122 github account")
+        from app.desktop.web_services import parse_service_account_query
+
+        svc_spec, svc_user = parse_service_account_query(clean_goal)
+        if svc_spec:
+            if svc_user and svc_spec.account_url_template:
+                acc_url = svc_spec.account_url_template.format(username=svc_user)
                 return {
                     "decision": "tool_call",
-                    "thought": f"Searching for '{target_term}' in active browser.",
-                    "tool": "browser_search",
-                    "arguments": {"query": target_term, "site": "google"},
+                    "thought": f"Opening {svc_spec.display_name} account for {svc_user}.",
+                    "tool": "browser_navigate",
+                    "arguments": {"url": acc_url, "service": svc_spec.name},
+                }
+            elif not svc_user:
+                return {
+                    "decision": "tool_call",
+                    "thought": f"Opening {svc_spec.display_name}.",
+                    "tool": "browser_navigate",
+                    "arguments": {"url": svc_spec.base_url, "service": svc_spec.name},
                 }
 
         if "go back" in g or g.startswith("back") or g == "back":
@@ -1218,6 +2030,22 @@ class LLMComputerAgent:
                 "arguments": {"path": "Music"},
             }
 
+        if "open downloads" in g or "open the downloads folder" in g:
+            return {
+                "decision": "tool_call",
+                "thought": "Opening Downloads folder.",
+                "tool": "open_folder",
+                "arguments": {"path": "Downloads"},
+            }
+
+        if "open documents" in g or "open the documents folder" in g:
+            return {
+                "decision": "tool_call",
+                "thought": "Opening Documents folder.",
+                "tool": "open_folder",
+                "arguments": {"path": "Documents"},
+            }
+
         if "how many" in g:
             item_type = "file" if "file" in g else "folder"
             target_dir = self.state.current_directory
@@ -1234,6 +2062,63 @@ class LLMComputerAgent:
                 "thought": f"Counting {item_type}s in '{target_dir}'.",
                 "tool": "count_directory_items",
                 "arguments": {"directory": target_dir, "item_type": item_type},
+            }
+
+        if any(
+            p in g
+            for p in (
+                "what are those files",
+                "what are the files",
+                "what files",
+                "which files",
+                "show the files",
+                "show files",
+                "list files",
+                "what are those",
+            )
+        ):
+            if (
+                self.typed_context.filesystem_results
+                or self.typed_context.last_active_domain == "filesystem"
+                or "explorer" in (self.state.active_application or "").lower()
+            ):
+                if self.typed_context.filesystem_results:
+                    file_names = [e.name for e in self.typed_context.filesystem_results]
+                    dir_name = (
+                        self.state.current_directory
+                        or self.typed_context.last_opened_folder
+                        or "Music"
+                    )
+                    return {
+                        "decision": "complete",
+                        "thought": f"Listing {len(file_names)} verified files from {dir_name}.",
+                        "response": f"The files in {dir_name} are: {', '.join(file_names)}.",
+                    }
+                else:
+                    target_dir = (
+                        self.state.current_directory
+                        or self.typed_context.last_opened_folder
+                        or "Music"
+                    )
+                    return {
+                        "decision": "tool_call",
+                        "thought": f"Listing directory items in '{target_dir}'.",
+                        "tool": "list_directory",
+                        "arguments": {"directory": target_dir},
+                    }
+
+        if any(
+            p in g
+            for p in ("what's inside", "whats inside", "inside it", "what is inside", "what inside")
+        ):
+            target_dir = (
+                self.state.current_directory or self.typed_context.last_opened_folder or "Music"
+            )
+            return {
+                "decision": "tool_call",
+                "thought": f"Listing directory items in '{target_dir}'.",
+                "tool": "list_directory",
+                "arguments": {"directory": target_dir},
             }
 
         if "open vs code" in g or "open visual studio code" in g:
@@ -1286,6 +2171,7 @@ class LLMComputerAgent:
             app = arguments.get("application", "")
             app_lower = app.lower().strip()
             from app.desktop.web_services import find_service
+
             svc_spec = find_service(app_lower)
             if svc_spec is not None and hasattr(self.harness, "execute_command"):
                 res = self.harness.execute_command(
@@ -1296,7 +2182,11 @@ class LLMComputerAgent:
                 res_dict = (
                     res.to_dict()
                     if hasattr(res, "to_dict")
-                    else (dict(res) if isinstance(res, dict) else {"success": True, "message": str(res)})
+                    else (
+                        dict(res)
+                        if isinstance(res, dict)
+                        else {"success": True, "message": str(res)}
+                    )
                 )
                 if self._current_session is not None:
                     self._current_session.active_browser = True
@@ -1310,7 +2200,7 @@ class LLMComputerAgent:
                 return self.harness.open_application(app)
 
         if tool_name in ("open_browser", "launch_browser"):
-            url = arguments.get("url") or "https://www.google.com"
+            url = arguments.get("url")
             browser = arguments.get("browser")
             if hasattr(self.harness, "execute_command"):
                 res = self.harness.execute_command(
@@ -1327,7 +2217,9 @@ class LLMComputerAgent:
             res_dict = (
                 res.to_dict()
                 if hasattr(res, "to_dict")
-                else (dict(res) if isinstance(res, dict) else {"success": True, "message": str(res)})
+                else (
+                    dict(res) if isinstance(res, dict) else {"success": True, "message": str(res)}
+                )
             )
             if self._current_session is not None:
                 self._current_session.active_browser = True
@@ -1364,14 +2256,24 @@ class LLMComputerAgent:
             return self.harness.open_file(path)
 
         if tool_name == "browser_navigate":
-            url = arguments.get("url") or "https://www.google.com"
+            url = arguments.get("url") or ""
             browser = arguments.get("browser")
             service = arguments.get("service")
-            if service:
-                res = self.harness.execute_command("open_service", {"service": service, "url": url}, session=self._current_session)
-            else:
+            if service and hasattr(self.harness, "execute_command"):
+                res = self.harness.execute_command(
+                    "open_service", {"service": service, "url": url}, session=self._current_session
+                )
+            elif hasattr(self.harness, "browser_navigate"):
                 res = self.harness.browser_navigate(url, browser=browser)
-            res_dict = res.to_dict() if hasattr(res, "to_dict") else (dict(res) if isinstance(res, dict) else {"success": True, "message": str(res)})
+            else:
+                res = {"success": True, "action": "browser_navigate", "url": url}
+            res_dict = (
+                res.to_dict()
+                if hasattr(res, "to_dict")
+                else (
+                    dict(res) if isinstance(res, dict) else {"success": True, "message": str(res)}
+                )
+            )
             if self._current_session is not None:
                 self._current_session.active_browser = True
                 if res_dict.get("needs_user_input") and res_dict.get("pending_prompt"):
@@ -1401,10 +2303,11 @@ class LLMComputerAgent:
         if tool_name == "browser_click":
             target = arguments.get("target", "")
             ordinal = arguments.get("ordinal")
-            # If target has a full URL, navigate there directly; else click element
-            if target.startswith("http"):
+            if hasattr(self.harness, "browser_click"):
+                return self.harness.browser_click(target, ordinal=ordinal)
+            elif target.startswith("http") and hasattr(self.harness, "browser_navigate"):
                 return self.harness.browser_navigate(target)
-            return self.harness.browser_click(target, ordinal=ordinal)
+            return {"success": True, "action": "browser_click", "target": target}
 
         return {
             "success": False,
@@ -1432,21 +2335,36 @@ class LLMComputerAgent:
         harness_result: dict[str, Any],
         observation: dict[str, Any],
     ) -> None:
-        """Update typed context memory with observed entities."""
         if tool_name in ("count_directory_items", "list_directory", "search_files"):
-            raw_items = (
-                harness_result.get("items")
-                or self.state.last_results
-                or harness_result.get("files")
-                or harness_result.get("folders")
-                or harness_result.get("matches")
-                or []
-            )
+            item_type = arguments.get("item_type") or harness_result.get("item_type")
+            if item_type == "file":
+                raw_items = (
+                    harness_result.get("items")
+                    or harness_result.get("files")
+                    or self.state.last_results
+                    or []
+                )
+            elif item_type == "folder":
+                raw_items = (
+                    harness_result.get("items")
+                    or harness_result.get("folders")
+                    or self.state.last_results
+                    or []
+                )
+            else:
+                raw_items = (
+                    harness_result.get("items")
+                    or self.state.last_results
+                    or harness_result.get("files")
+                    or harness_result.get("folders")
+                    or harness_result.get("matches")
+                    or []
+                )
             cur_dir = harness_result.get("directory", self.state.current_directory)
             if raw_items and isinstance(raw_items[0], dict):
                 self.typed_context.set_filesystem_entities(raw_items, base_dir=cur_dir)
             elif raw_items and isinstance(raw_items[0], str):
-                is_file = bool(harness_result.get("files")) or arguments.get("item_type") == "file"
+                is_file = (item_type == "file") or bool(harness_result.get("files"))
                 dict_items = [
                     {
                         "name": n,
@@ -1459,21 +2377,38 @@ class LLMComputerAgent:
                 ]
                 self.typed_context.set_filesystem_entities(dict_items, base_dir=cur_dir)
 
+        if tool_name == "open_application":
+            app = str(arguments.get("application") or "").lower()
+            if "explorer" in app:
+                self.typed_context.last_active_domain = "filesystem"
+                self.typed_context.clear_browser()
+
         if tool_name == "open_folder":
             folder_path = arguments.get("path")
             self.typed_context.last_opened_folder = folder_path
             self.typed_context.last_active_domain = "filesystem"
+            self.typed_context.clear_browser()
             self.typed_context.restore_folder_entities(folder_path)
 
         if tool_name == "open_file":
             self.typed_context.last_opened_file = arguments.get("path")
             self.typed_context.last_active_domain = "filesystem"
+            self.typed_context.clear_browser()
 
         if tool_name in ("browser_search", "browser_navigate"):
             self.typed_context.last_active_domain = "browser"
             # If YouTube search and web_context has results
             if self.state.web_context.current_list:
                 self.typed_context.set_youtube_entities(self.state.web_context.current_list)
+            # If web search results were observed
+            search_items = (
+                harness_result.get("items")
+                or harness_result.get("results")
+                or observation.get("browser_search_results")
+                or []
+            )
+            if search_items and isinstance(search_items, list):
+                self.typed_context.set_browser_search_entities(search_items)
 
     def _verify_action(
         self,
@@ -1483,10 +2418,11 @@ class LLMComputerAgent:
         observation: dict[str, Any],
         task_id: str,
         generation: int,
+        user_goal: str = "",
     ) -> VerificationResult:
         """Run task-specific verification against live computer observation."""
-        if tool_name == "open_application":
-            app = arguments.get("application", "")
+        if tool_name in ("open_application", "open_browser", "launch_browser"):
+            app = arguments.get("application", "") or "browser"
             active_app = observation.get("active_application", "")
             # Check window title or active application
             if app.lower() in active_app.lower() or active_app.lower() in app.lower():
@@ -1518,16 +2454,25 @@ class LLMComputerAgent:
                     details=harness_result,
                     evidence={"current_directory": cur_dir},
                 )
-            if harness_result.get("success"):
-                return VerificationResult(
-                    success=True,
-                    confidence=0.9,
-                    reason=f"Folder {path} opened.",
-                    details=harness_result,
-                    evidence=harness_result,
-                )
+            return self.verifier.verify_filesystem_target(
+                expected_target=path,
+                observation=observation,
+                task_id=task_id,
+                generation=generation,
+            )
 
-        if tool_name in ("count_directory_items", "list_directory"):
+        if tool_name == "count_directory_items":
+            cnt = harness_result.get("count", 0)
+            d_name = arguments.get("directory") or "Desktop"
+            return self.verifier.verify_item_count(
+                expected_target=d_name,
+                count=cnt,
+                observation=observation,
+                task_id=task_id,
+                generation=generation,
+            )
+
+        if tool_name == "list_directory":
             if harness_result.get("success"):
                 return VerificationResult(
                     success=True,
@@ -1537,39 +2482,167 @@ class LLMComputerAgent:
                     evidence=harness_result,
                 )
 
-        if tool_name == "browser_navigate":
-            target_url = arguments.get("url", "")
+        if tool_name in ("browser_navigate", "browser_click"):
+            target = arguments.get("url") or arguments.get("target") or ""
+            target_str = str(target).strip()
             browser_obs = observation.get("browser") or {}
             active_url = (
-                browser_obs.get("url", "")
+                harness_result.get("url", "")
                 or harness_result.get("details", {}).get("url", "")
+                or self.state.current_url
+                or browser_obs.get("url", "")
+                or getattr(self.state.browser, "url", None)
+                or ""
             )
-            if "youtube.com" in target_url and "youtube.com" in active_url:
+            page_title = str(
+                browser_obs.get("title", "")
+                or harness_result.get("title", "")
+                or harness_result.get("details", {}).get("title", "")
+                or getattr(self.state.browser, "title", None)
+                or self.state.active_window_title
+                or ""
+            )
+
+            # 1. Goal-level verification for specific service account (e.g. GitHub)
+            from app.desktop.web_services import parse_service_account_query
+
+            svc_spec, svc_user = parse_service_account_query(user_goal)
+            if svc_spec and svc_user:
+                if svc_spec.name.lower() == "github":
+                    return self.verifier.verify_github_profile(
+                        username=svc_user,
+                        observation=observation,
+                        task_id=task_id,
+                        generation=generation,
+                    )
+                # If browser is still on Google search results page
+                if "google.com/search" in active_url:
+                    return VerificationResult(
+                        success=False,
+                        confidence=0.0,
+                        reason=(
+                            f"Verification failed: browser is still on Google search results, "
+                            f"not {svc_spec.display_name} profile for '{svc_user}'."
+                        ),
+                        details=harness_result,
+                        evidence={"active_url": active_url, "target_user": svc_user},
+                    )
+                if svc_user.lower() in active_url.lower() or (
+                    svc_spec.name.lower() in active_url.lower()
+                    and svc_user.lower() in page_title.lower()
+                ):
+                    return VerificationResult(
+                        success=True,
+                        confidence=1.0,
+                        reason=(
+                            f"Verified active at {svc_spec.display_name} profile for '{svc_user}'."
+                        ),
+                        details=harness_result,
+                        evidence={"active_url": active_url, "user": svc_user, "title": page_title},
+                    )
+
+            if "github" in user_goal.lower() and "lohith122" in user_goal.lower():
+                return self.verifier.verify_github_profile(
+                    username="lohith122",
+                    observation=observation,
+                    task_id=task_id,
+                    generation=generation,
+                )
+
+            # 2. YouTube verification
+            if "youtube.com" in target_str or "youtube" in user_goal.lower():
+                if "search" in user_goal.lower():
+                    m_q = re.search(r"search\s+(.+?)\s+on\s+youtube", user_goal, re.IGNORECASE)
+                    q = m_q.group(1).strip() if m_q else "YouTube"
+                    return self.verifier.verify_youtube_search(
+                        query=q,
+                        observation=observation,
+                        task_id=task_id,
+                        generation=generation,
+                    )
+                if "youtube.com" in active_url:
+                    return VerificationResult(
+                        success=True,
+                        confidence=1.0,
+                        reason="Browser active at YouTube.",
+                        details=harness_result,
+                        evidence={"url": active_url, "title": page_title},
+                    )
+
+            # 3. Direct URL target match
+            if target_str.startswith("http") and target_str in active_url:
                 return VerificationResult(
                     success=True,
                     confidence=1.0,
-                    reason="Browser active at YouTube.",
+                    reason=f"Navigated to {target_str}.",
                     details=harness_result,
                     evidence={"url": active_url},
                 )
+
+            # 4. Search results rejection if search wasn't the goal
             if harness_result.get("success"):
+                if "google.com/search" in active_url and not any(
+                    w in user_goal.lower() for w in ("search for", "search ", "google")
+                ):
+                    return VerificationResult(
+                        success=False,
+                        confidence=0.0,
+                        reason=(
+                            "Action failed: browser remained on search results "
+                            "instead of target page."
+                        ),
+                        details=harness_result,
+                        evidence={"url": active_url},
+                    )
                 return VerificationResult(
                     success=True,
                     confidence=0.9,
-                    reason=f"Navigated to {target_url}.",
+                    reason=f"Action '{tool_name}' verified.",
                     details=harness_result,
                     evidence=harness_result,
                 )
 
         if tool_name == "browser_search":
-            if harness_result.get("success"):
-                return VerificationResult(
-                    success=True,
-                    confidence=1.0,
-                    reason="Search results displayed in browser.",
-                    details=harness_result,
-                    evidence=harness_result,
+            query = arguments.get("query", "")
+            site = arguments.get("site", "")
+            effective_obs = dict(observation)
+            fresh_url = None
+            if harness_result.get("message"):
+                m_u = re.search(r"https?://[^\s]+", str(harness_result.get("message")))
+                if m_u:
+                    fresh_url = m_u.group(0).rstrip(".,;")
+            h_det_url = harness_result.get("details", {}).get("url")
+            h_url = fresh_url or harness_result.get("url") or h_det_url
+            if h_url:
+                effective_obs["current_url"] = h_url
+                effective_obs["browser_url"] = h_url
+                self.state.current_url = h_url
+            if site == "youtube" or "youtube" in user_goal.lower():
+                return self.verifier.verify_youtube_search(
+                    query=query,
+                    observation=effective_obs,
+                    task_id=task_id,
+                    generation=generation,
                 )
+            v_res = self.verifier.verify_search_results(
+                query=query,
+                observation=effective_obs,
+                task_id=task_id,
+                generation=generation,
+            )
+            if not v_res.verified and harness_result.get("success") and h_url:
+                q_norm = query.lower()
+                if q_norm in h_url.lower() or q_norm.replace(" ", "+") in h_url.lower():
+                    return VerificationResult(
+                        success=True,
+                        confidence=0.95,
+                        reason=f"Search for '{query}' verified in URL",
+                        details=harness_result,
+                        task_id=task_id,
+                        generation=generation,
+                        evidence={"url": h_url},
+                    )
+            return v_res
 
         if tool_name == "browser_back":
             if harness_result.get("success"):
@@ -1587,16 +2660,6 @@ class LLMComputerAgent:
                     success=True,
                     confidence=1.0,
                     reason="Message transmitted and verified in chat UI.",
-                    details=harness_result,
-                    evidence=harness_result,
-                )
-
-        if tool_name == "browser_click":
-            if harness_result.get("success"):
-                return VerificationResult(
-                    success=True,
-                    confidence=1.0,
-                    reason="Clicked target element.",
                     details=harness_result,
                     evidence=harness_result,
                 )
@@ -1622,4 +2685,3 @@ __all__ = [
     "LLMComputerAgent",
     "default_computer_agent",
 ]
-

@@ -315,15 +315,31 @@ class VerificationService:
     ) -> VerificationResult:
         """Verify search query was reflected in browser or filesystem results."""
         browser_info = observation.get("browser") or {}
-        curr_url = (browser_info.get("url") or "").lower()
+        curr_url = (
+            observation.get("current_url")
+            or observation.get("browser_url")
+            or browser_info.get("url")
+            or ""
+        ).lower()
         q_norm = query.lower()
+        q_plus = q_norm.replace(" ", "+")
 
-        if q_norm in curr_url or "search_query" in curr_url:
+        if (
+            q_norm in curr_url
+            or q_plus in curr_url
+            or "search_query" in curr_url
+            or ("search" in curr_url and any(w in curr_url for w in q_norm.split()))
+        ):
             return VerificationResult(
                 success=True,
                 confidence=0.95,
                 reason=f"Search for '{query}' verified in URL",
                 details={"url": curr_url},
+                task_id=task_id,
+                generation=generation,
+                expected=query,
+                observed=curr_url,
+                evidence={"url": curr_url},
             )
 
         fs_info = observation.get("filesystem") or {}
@@ -334,6 +350,11 @@ class VerificationService:
                 confidence=0.95,
                 reason=f"Filesystem search returned {len(last_results)} items",
                 details={"count": len(last_results)},
+                task_id=task_id,
+                generation=generation,
+                expected=query,
+                observed=str(len(last_results)),
+                evidence={"count": len(last_results)},
             )
 
         return VerificationResult(
@@ -341,6 +362,203 @@ class VerificationService:
             confidence=0.20,
             reason=f"Could not verify search results for '{query}'",
             details={"url": curr_url},
+            task_id=task_id,
+            generation=generation,
+            expected=query,
+            observed=curr_url,
+        )
+
+    def verify_youtube_search(
+        self,
+        query: str,
+        observation: dict[str, Any],
+        task_id: str | None = None,
+        generation: int = 0,
+    ) -> VerificationResult:
+        """Goal-level verification: YouTube search results are active and reflect query."""
+        browser_info = observation.get("browser") or {}
+        curr_url = (
+            observation.get("current_url")
+            or browser_info.get("url")
+            or browser_info.get("current_url")
+            or ""
+        ).lower()
+        active_title = (
+            observation.get("page_title")
+            or observation.get("active_window_title")
+            or (observation.get("window") or {}).get("title")
+            or (browser_info.get("title") or "")
+            or ""
+        ).lower()
+        q_norm = query.lower().strip()
+
+        # Reject generic Google search
+        if "google.com/search" in curr_url:
+            return VerificationResult(
+                success=False,
+                confidence=0.0,
+                reason=(
+                    f"Verification failed: browser is on Google search, "
+                    f"not YouTube search for '{query}'."
+                ),
+                details={"url": curr_url, "title": active_title},
+                task_id=task_id,
+                generation=generation,
+                expected=f"YouTube search for '{query}'",
+                observed=curr_url,
+            )
+
+        is_youtube = "youtube.com" in curr_url or "youtube" in active_title
+        q_plus = q_norm.replace(" ", "+")
+        has_query = (
+            ("search_query=" in curr_url and (q_plus in curr_url or q_norm in curr_url))
+            or (q_norm in active_title and "youtube" in active_title)
+            or ("results?search_query" in curr_url)
+        )
+
+        if is_youtube and has_query:
+            return VerificationResult(
+                success=True,
+                confidence=0.98,
+                reason=f"Verified YouTube search results page for '{query}'.",
+                details={"url": curr_url, "title": active_title},
+                task_id=task_id,
+                generation=generation,
+                expected=f"YouTube search for '{query}'",
+                observed=curr_url or active_title,
+                evidence={"url": curr_url, "title": active_title},
+            )
+
+        return VerificationResult(
+            success=False,
+            confidence=0.15,
+            reason=(
+                f"Could not verify YouTube search results for '{query}' "
+                f"(active URL: '{curr_url}')."
+            ),
+            details={"url": curr_url, "title": active_title},
+            task_id=task_id,
+            generation=generation,
+            expected=f"YouTube search for '{query}'",
+            observed=curr_url or active_title,
+        )
+
+    def verify_github_profile(
+        self,
+        username: str,
+        observation: dict[str, Any],
+        task_id: str | None = None,
+        generation: int = 0,
+    ) -> VerificationResult:
+        """Goal-level verification: Verified active on requested GitHub profile."""
+        browser_info = observation.get("browser") or {}
+        curr_url = (
+            observation.get("current_url")
+            or observation.get("browser_url")
+            or browser_info.get("url")
+            or browser_info.get("current_url")
+            or ""
+        ).lower()
+        active_title = (
+            observation.get("page_title")
+            or observation.get("active_window_title")
+            or (observation.get("window") or {}).get("title")
+            or (browser_info.get("title") or "")
+            or ""
+        ).lower()
+        u_norm = username.lower().strip()
+
+        # Reject if still on search results
+        if "google.com/search" in curr_url:
+            return VerificationResult(
+                success=False,
+                confidence=0.0,
+                reason=(
+                    f"Verification failed: browser is on Google search, "
+                    f"not GitHub profile for '{username}'."
+                ),
+                details={"url": curr_url, "title": active_title},
+                task_id=task_id,
+                generation=generation,
+                expected=f"GitHub profile for '{username}'",
+                observed=curr_url,
+            )
+
+        is_github = "github.com" in curr_url or "github" in active_title
+        matches_user = (
+            f"github.com/{u_norm}" in curr_url
+            or (u_norm in curr_url and "github" in curr_url)
+            or (u_norm in active_title and "github" in active_title)
+        )
+
+        if is_github and matches_user:
+            return VerificationResult(
+                success=True,
+                confidence=0.98,
+                reason=f"Verified active at GitHub profile for '{username}'.",
+                details={"url": curr_url, "title": active_title},
+                task_id=task_id,
+                generation=generation,
+                expected=f"GitHub profile for '{username}'",
+                observed=curr_url or active_title,
+                evidence={"url": curr_url, "username": username, "title": active_title},
+            )
+
+        return VerificationResult(
+            success=False,
+            confidence=0.10,
+            reason=f"Could not verify GitHub profile for '{username}' (active URL: '{curr_url}').",
+            details={"url": curr_url, "title": active_title},
+            task_id=task_id,
+            generation=generation,
+            expected=f"GitHub profile for '{username}'",
+            observed=curr_url or active_title,
+        )
+
+    def verify_filesystem_target(
+        self,
+        expected_target: str,
+        observation: dict[str, Any],
+        task_id: str | None = None,
+        generation: int = 0,
+    ) -> VerificationResult:
+        """Goal-level verification: File Explorer / Desktop is open at target path."""
+        active_title = (
+            observation.get("active_window_title")
+            or (observation.get("window") or {}).get("title")
+            or ""
+        ).lower()
+        curr_dir = (observation.get("current_directory") or "").lower()
+        tgt_norm = expected_target.lower().strip()
+
+        matches_target = (
+            tgt_norm in curr_dir
+            or tgt_norm in active_title
+            or (tgt_norm == "desktop" and ("desktop" in active_title or "desktop" in curr_dir))
+        )
+
+        if matches_target:
+            return VerificationResult(
+                success=True,
+                confidence=0.96,
+                reason=f"Verified filesystem location '{expected_target}' is active.",
+                details={"current_directory": curr_dir, "title": active_title},
+                task_id=task_id,
+                generation=generation,
+                expected=expected_target,
+                observed=curr_dir or active_title,
+                evidence={"directory": curr_dir, "title": active_title},
+            )
+
+        return VerificationResult(
+            success=False,
+            confidence=0.20,
+            reason=f"Could not verify filesystem location '{expected_target}'.",
+            details={"current_directory": curr_dir, "title": active_title},
+            task_id=task_id,
+            generation=generation,
+            expected=expected_target,
+            observed=curr_dir or active_title,
         )
 
     def verify_message_sent(

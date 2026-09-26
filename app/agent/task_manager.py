@@ -10,21 +10,23 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class TaskLifecycle(str, Enum):
+class TaskLifecycle(StrEnum):
     """Rigorous task lifecycle states."""
 
+    IDLE = "idle"
     UNDERSTANDING = "understanding"
     PLANNING = "planning"
     ACTING = "acting"
     OBSERVING = "observing"
     VERIFYING = "verifying"
     RECOVERING = "recovering"
+    WAITING_FOR_USER = "waiting_for_user"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -38,7 +40,9 @@ class AgentTask:
     task_id: str
     generation: int
     intent: str
-    status: str = "pending"  # pending, running, completed, cancelled, failed, stale
+    goal: str = ""
+    # pending, running, completed, cancelled, failed, stale, waiting_for_user
+    status: str = "pending"
     lifecycle_state: str = TaskLifecycle.UNDERSTANDING.value
     current_step: int = 1
     total_steps: int = 1
@@ -57,6 +61,7 @@ class AgentTask:
             TaskLifecycle.FAILED.value,
             TaskLifecycle.CANCELLED.value,
             TaskLifecycle.STALE.value,
+            TaskLifecycle.WAITING_FOR_USER.value,
         }:
             self.status = val
 
@@ -152,19 +157,22 @@ class TaskManager:
         total_steps: int = 1,
         parent_task_id: str | None = None,
         generation: int | None = None,
+        goal: str = "",
+        task_id: str | None = None,
     ) -> AgentTask:
         """Create and register a new tracked agent task."""
         self._task_counter += 1
         gen = generation if generation is not None else self._current_generation
-        task_id = f"task_{int(time.time())}_{self._task_counter:04d}"
+        tid = task_id or f"task_{int(time.time())}_{self._task_counter:04d}"
         task = AgentTask(
-            task_id=task_id,
+            task_id=tid,
             generation=gen,
             intent=intent,
+            goal=goal or intent,
             total_steps=total_steps,
             parent_task_id=parent_task_id,
         )
-        self._tasks[task_id] = task
+        self._tasks[tid] = task
         return task
 
     def get_task(self, task_id: str) -> AgentTask | None:

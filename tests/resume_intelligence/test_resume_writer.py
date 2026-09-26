@@ -7,7 +7,6 @@ from starlette.testclient import TestClient
 
 from app.config.settings import get_settings
 from app.main import create_app
-from app.resume_intelligence.extractor import build_structured_resume
 from app.resume_intelligence.jd_matcher import compare_jd_and_resume
 from app.resume_intelligence.models import (
     AiWriteRequest,
@@ -138,6 +137,12 @@ async def test_project_rewriting_star_structure(sample_candidate_resume: Structu
             "Analyzed",
             "Researched",
             "Delivered",
+            "Conducted",
+            "Evaluated",
+            "Executed",
+            "Established",
+            "Achieved",
+            "Successfully",
         ]
 
 

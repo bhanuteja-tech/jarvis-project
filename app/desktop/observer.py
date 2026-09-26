@@ -11,6 +11,7 @@ import logging
 import time
 from typing import Any
 
+from app.computer.observation import ComputerObservation
 from app.desktop.screen_observer import ScreenObserver, default_screen_observer
 from app.desktop.state import ComputerState, default_computer_state
 from app.desktop.ui_automation import default_ui_automation
@@ -154,21 +155,39 @@ class ComputerObserver:
         fs_info = self.observe_filesystem()
         open_wins = self.get_open_windows()
 
-        observation = {
-            "timestamp": time.time(),
-            "active_application": (
-                app_obs.get("active_application") or self.state.active_application
-            ),
-            "window": active_win,
-            "active_window_id": active_win.get("id") if active_win else self.state.active_window_id,
-            "active_window_title": (
-                active_win.get("title") if active_win else self.state.active_window_title
-            ),
-            "browser": browser_info,
-            "filesystem": fs_info,
-            "current_directory": self.state.current_directory,
-            "open_windows_count": len(open_wins),
-        }
+        active_app_name = (
+            app_obs.get("active_application") or self.state.active_application
+        )
+        active_win_title = (
+            active_win.get("title") if active_win else self.state.active_window_title
+        )
+        current_url = browser_info.get("url") or self.state.current_url
+        page_title = browser_info.get("title") or self.state.active_page_title
+
+        obs_model = ComputerObservation(
+            timestamp=time.time(),
+            active_application=active_app_name,
+            active_window=active_win,
+            browser=browser_info.get("name") or self.state.browser_name,
+            browser_tabs=browser_info.get("open_pages") or [],
+            current_url=current_url,
+            page_title=page_title,
+            directory=self.state.current_directory,
+            filesystem_items=fs_info.get("last_search_results") or [],
+            open_windows=open_wins,
+            running_processes_count=len(open_wins),
+            active_window_title=active_win_title,
+        )
+
+        observation = obs_model.to_dict()
+        # Include legacy keys for backward compatibility
+        observation["filesystem"] = fs_info
+        observation["browser"] = browser_info
+        observation["window"] = active_win
+        observation["active_window_id"] = active_win.get("id") if active_win else self.state.active_window_id
+        observation["active_window_title"] = active_win_title
+        observation["current_directory"] = self.state.current_directory
+        observation["open_windows_count"] = len(open_wins)
 
         # Update ComputerState observation cache
         self.state.last_observation = (

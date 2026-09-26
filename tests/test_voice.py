@@ -61,6 +61,7 @@ async def test_voice_turn_fast_action(
     }
 
     await orchestrator.handle_message(session, msg, send=send)
+    await orchestrator.wait_for_run()
 
     event_types = [e["type"] for e in events]
     assert EventType.AGENT_STARTED in event_types

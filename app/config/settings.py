@@ -129,6 +129,19 @@ class Settings(BaseSettings):
     #: Master switch for local desktop control features (open apps, URLs, etc.)
     #: No API keys required; all operations are local stdlib-only.
     desktop_control_enabled: bool = True
+    computer_agent_enabled: bool = True
+    layered_routing_enabled: bool = True
+    gemini_computer_use_enabled: bool = True
+    voice_enabled: bool = True
+
+    # Circuit breakers and task bounds (Section 10 & 51)
+    max_actions_per_task: int = Field(default=30, ge=1, le=100)
+    max_retries_per_action: int = Field(default=2, ge=0, le=5)
+    max_identical_actions: int = Field(default=2, ge=1, le=5)
+    max_no_progress_steps: int = Field(default=3, ge=1, le=10)
+    task_timeout_seconds: float = Field(default=60.0, ge=5.0, le=600.0)
+    browser_reuse_enabled: bool = True
+    streaming_enabled: bool = True
 
     # --- Phase 10: LLM provider layer (Jarvis assistant surface ONLY) --------
     #: Provider selection. Unknown/missing config disables the layer.

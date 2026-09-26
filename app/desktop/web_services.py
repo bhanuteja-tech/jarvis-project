@@ -157,6 +157,37 @@ def find_service(name: str) -> ServiceSpec | None:
     return None
 
 
+def parse_service_account_query(text: str) -> tuple[ServiceSpec | None, str | None]:
+    """Extract a service spec and target username from text like 'open lohith122 github account'."""
+    import re
+
+    norm = (text or "").strip().lower()
+    if not norm:
+        return None, None
+    for s_name, spec in WEB_SERVICES.items():
+        aliases = (s_name,) + spec.aliases
+        for alias in aliases:
+            # Check for '<username> <alias> account/profile'
+            m1 = re.search(
+                rf"\b([a-zA-Z0-9_-]+)\s+{re.escape(alias)}\s*(?:account|profile|page)?\b",
+                norm,
+            )
+            if m1:
+                uname = m1.group(1)
+                if uname not in {"open", "view", "launch", "go", "to", "the", "my"}:
+                    return spec, uname
+            # Check for '<alias> account/profile for/of <username>'
+            m2 = re.search(
+                rf"\b{re.escape(alias)}\s+(?:account|profile|page)?\s*(?:for|of)?\s+([a-zA-Z0-9_-]+)\b",
+                norm,
+            )
+            if m2:
+                uname = m2.group(1)
+                if uname not in {"open", "view", "launch", "go", "to", "the", "my"}:
+                    return spec, uname
+    return None, None
+
+
 @dataclass
 class ServiceResolution:
     success: bool
@@ -173,11 +204,13 @@ def resolve_service_request(
     service_name: str,
     *,
     account: bool = False,
+    username: str | None = None,
     query: str | None = None,
     vault: CredentialVault | None = None,
 ) -> ServiceResolution:
     """Resolve a user's web service request.
 
+    If `username` is provided, constructs the personalized URL directly for that user.
     If `account` is True and the service needs a credential (e.g. username),
     it checks the vault. If found, constructs the personalized URL.
     If missing, sets `needs_credential=True` so JARVIS can prompt the user.
@@ -191,6 +224,19 @@ def resolve_service_request(
         )
 
     v = vault or default_vault
+
+    # If explicit username provided and service has account template
+    if username and spec.account_url_template:
+        url = spec.account_url_template.format(
+            **{spec.credential_field: quote_plus(str(username))}
+        )
+        return ServiceResolution(
+            success=True,
+            url=url,
+            service=spec.name,
+            message=f"👤 Opening {spec.display_name} account (@{username}).",
+            details={"service": spec.name, "url": url, "username": username},
+        )
 
     # If query is provided and service supports search
     if query and spec.search_url_template:
@@ -277,5 +323,6 @@ __all__ = [
     "ServiceResolution",
     "WEB_SERVICES",
     "find_service",
+    "parse_service_account_query",
     "resolve_service_request",
 ]

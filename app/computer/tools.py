@@ -11,9 +11,16 @@ Guarantees:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Literal
 
 RiskLevel = Literal["low", "medium", "high"]
+
+
+class SideEffectLevel(StrEnum):
+    READ_ONLY = "READ_ONLY"
+    REVERSIBLE = "REVERSIBLE"
+    EXTERNAL_SIDE_EFFECT = "EXTERNAL_SIDE_EFFECT"
 
 
 @dataclass
@@ -25,6 +32,7 @@ class ComputerToolDefinition:
     parameters: dict[str, Any]
     required_parameters: list[str]
     risk_level: RiskLevel = "low"
+    side_effect_level: SideEffectLevel = SideEffectLevel.REVERSIBLE
     requires_confirmation: bool = False
     verification_strategy: str = "active_state"
     domain: Literal["computer"] = "computer"
@@ -41,6 +49,36 @@ class ComputerToolDefinition:
                     "properties": self.parameters,
                     "required": self.required_parameters,
                 },
+            },
+        }
+
+    def to_gemini_schema(self) -> dict[str, Any]:
+        """Convert to Google Gemini function declaration schema."""
+        gemini_type_map = {
+            "string": "STRING",
+            "number": "NUMBER",
+            "integer": "INTEGER",
+            "boolean": "BOOLEAN",
+            "array": "ARRAY",
+            "object": "OBJECT",
+        }
+        properties = {}
+        for p_name, p_spec in self.parameters.items():
+            prop: dict[str, Any] = {
+                "type": gemini_type_map.get(p_spec.get("type", "string"), "STRING"),
+                "description": p_spec.get("description", ""),
+            }
+            if "enum" in p_spec:
+                prop["enum"] = p_spec["enum"]
+            properties[p_name] = prop
+
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "OBJECT",
+                "properties": properties,
+                "required": self.required_parameters,
             },
         }
 
@@ -133,6 +171,7 @@ COMPUTER_TOOL_DEFINITIONS: list[ComputerToolDefinition] = [
         },
         required_parameters=[],
         risk_level="low",
+        side_effect_level=SideEffectLevel.READ_ONLY,
         verification_strategy="listing_obtained",
     ),
     ComputerToolDefinition(
@@ -157,6 +196,7 @@ COMPUTER_TOOL_DEFINITIONS: list[ComputerToolDefinition] = [
         },
         required_parameters=[],
         risk_level="low",
+        side_effect_level=SideEffectLevel.READ_ONLY,
         verification_strategy="count_calculated",
     ),
     ComputerToolDefinition(
@@ -176,6 +216,7 @@ COMPUTER_TOOL_DEFINITIONS: list[ComputerToolDefinition] = [
         },
         required_parameters=["query"],
         risk_level="low",
+        side_effect_level=SideEffectLevel.READ_ONLY,
         verification_strategy="search_completed",
     ),
     ComputerToolDefinition(
@@ -336,6 +377,7 @@ COMPUTER_TOOL_DEFINITIONS: list[ComputerToolDefinition] = [
         parameters={},
         required_parameters=[],
         risk_level="low",
+        side_effect_level=SideEffectLevel.READ_ONLY,
         verification_strategy="state_captured",
     ),
     ComputerToolDefinition(
@@ -430,11 +472,21 @@ COMPUTER_TOOL_DEFINITIONS: list[ComputerToolDefinition] = [
         verification_strategy="key_dispatched",
     ),
     ComputerToolDefinition(
+        name="screen_observe",
+        description="Capture current screen state, active window, and visible elements.",
+        parameters={},
+        required_parameters=[],
+        risk_level="low",
+        side_effect_level=SideEffectLevel.READ_ONLY,
+        verification_strategy="active_state",
+    ),
+    ComputerToolDefinition(
         name="get_active_window",
         description="Query the OS for the currently focused foreground window title and process.",
         parameters={},
         required_parameters=[],
         risk_level="low",
+        side_effect_level=SideEffectLevel.READ_ONLY,
         verification_strategy="window_info",
     ),
     ComputerToolDefinition(
@@ -445,6 +497,7 @@ COMPUTER_TOOL_DEFINITIONS: list[ComputerToolDefinition] = [
         parameters={},
         required_parameters=[],
         risk_level="low",
+        side_effect_level=SideEffectLevel.READ_ONLY,
         verification_strategy="state_info",
     ),
 
@@ -469,6 +522,7 @@ COMPUTER_TOOL_DEFINITIONS: list[ComputerToolDefinition] = [
         },
         required_parameters=["recipient", "message"],
         risk_level="high",
+        side_effect_level=SideEffectLevel.EXTERNAL_SIDE_EFFECT,
         requires_confirmation=True,
         verification_strategy="message_drafted",
     ),
@@ -494,6 +548,7 @@ COMPUTER_TOOL_DEFINITIONS: list[ComputerToolDefinition] = [
         },
         required_parameters=["recipient", "message"],
         risk_level="high",
+        side_effect_level=SideEffectLevel.EXTERNAL_SIDE_EFFECT,
         requires_confirmation=True,
         verification_strategy="message_sent",
     ),
@@ -507,3 +562,61 @@ COMPUTER_TOOLS_BY_NAME: dict[str, ComputerToolDefinition] = {
 def get_openai_tool_schemas() -> list[dict[str, Any]]:
     """Return all computer tools formatted as OpenAI / Ollama tool schemas."""
     return [t.to_openai_schema() for t in COMPUTER_TOOL_DEFINITIONS]
+
+
+class ComputerToolRegistry:
+    """Authoritative registry for controlled computer tools.
+
+    Guarantees:
+    - No arbitrary shell or subprocess execution exposed.
+    - Explicit classification of side effects (READ_ONLY, REVERSIBLE, EXTERNAL_SIDE_EFFECT).
+    - Hard domain isolation strictly for Computer Control.
+    """
+
+    def __init__(self, tools: list[ComputerToolDefinition] | None = None) -> None:
+        self._tools: dict[str, ComputerToolDefinition] = {
+            t.name: t for t in (tools or COMPUTER_TOOL_DEFINITIONS)
+        }
+
+    def get(self, name: str) -> ComputerToolDefinition | None:
+        return self._tools.get(name)
+
+    def is_allowed(self, name: str) -> bool:
+        return name in self._tools
+
+    def get_side_effect_level(self, name: str) -> SideEffectLevel:
+        tool = self.get(name)
+        return tool.side_effect_level if tool else SideEffectLevel.REVERSIBLE
+
+    def requires_confirmation(self, name: str) -> bool:
+        tool = self.get(name)
+        return tool.requires_confirmation if tool else False
+
+    def list_tools(self) -> list[ComputerToolDefinition]:
+        return list(self._tools.values())
+
+    def get_schemas(self) -> list[dict[str, Any]]:
+        return [t.to_openai_schema() for t in self._tools.values()]
+
+    def get_gemini_declarations(self) -> list[dict[str, Any]]:
+        return [t.to_gemini_schema() for t in self._tools.values()]
+
+
+def get_gemini_tool_declarations() -> list[dict[str, Any]]:
+    """Return all computer tools formatted as Google Gemini function declarations."""
+    return [t.to_gemini_schema() for t in COMPUTER_TOOL_DEFINITIONS]
+
+
+default_computer_tool_registry = ComputerToolRegistry()
+
+__all__ = [
+    "SideEffectLevel",
+    "ComputerToolDefinition",
+    "COMPUTER_TOOL_DEFINITIONS",
+    "COMPUTER_TOOLS_BY_NAME",
+    "get_openai_tool_schemas",
+    "get_gemini_tool_declarations",
+    "ComputerToolRegistry",
+    "default_computer_tool_registry",
+]
+

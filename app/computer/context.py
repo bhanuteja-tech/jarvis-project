@@ -35,8 +35,19 @@ class FileSystemEntity:
     source: EntitySource = "filesystem"
     observed_at: float = field(default_factory=time.time)
 
+    @property
+    def path_or_url(self) -> str:
+        return self.path
+
+    @property
+    def timestamp(self) -> float:
+        return self.observed_at
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d["path_or_url"] = self.path_or_url
+        d["timestamp"] = self.timestamp
+        return d
 
 
 @dataclass
@@ -52,8 +63,88 @@ class YouTubeVideoEntity:
     source: EntitySource = "browser_dom_cdp"
     observed_at: float = field(default_factory=time.time)
 
+    @property
+    def name(self) -> str:
+        return self.title
+
+    @property
+    def path_or_url(self) -> str:
+        return self.url
+
+    @property
+    def timestamp(self) -> float:
+        return self.observed_at
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d["name"] = self.name
+        d["path_or_url"] = self.path_or_url
+        d["timestamp"] = self.timestamp
+        return d
+
+
+@dataclass
+class YouTubeChannelEntity:
+    """A real YouTube channel observed in the browser DOM."""
+
+    ordinal: int
+    title: str
+    url: str
+    channel_id: str | None = None
+    type: Literal["channel"] = "channel"
+    source: EntitySource = "browser_dom_cdp"
+    observed_at: float = field(default_factory=time.time)
+
+    @property
+    def name(self) -> str:
+        return self.title
+
+    @property
+    def path_or_url(self) -> str:
+        return self.url
+
+    @property
+    def timestamp(self) -> float:
+        return self.observed_at
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["name"] = self.name
+        d["path_or_url"] = self.path_or_url
+        d["timestamp"] = self.timestamp
+        return d
+
+
+@dataclass
+class YouTubePlaylistEntity:
+    """A real YouTube playlist observed in the browser DOM."""
+
+    ordinal: int
+    title: str
+    url: str
+    video_count: int | None = None
+    type: Literal["playlist"] = "playlist"
+    source: EntitySource = "browser_dom_cdp"
+    observed_at: float = field(default_factory=time.time)
+
+    @property
+    def name(self) -> str:
+        return self.title
+
+    @property
+    def path_or_url(self) -> str:
+        return self.url
+
+    @property
+    def timestamp(self) -> float:
+        return self.observed_at
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["name"] = self.name
+        d["path_or_url"] = self.path_or_url
+        d["timestamp"] = self.timestamp
+        return d
 
 
 @dataclass
@@ -68,8 +159,57 @@ class BrowserResultEntity:
     source: EntitySource = "browser_dom_cdp"
     observed_at: float = field(default_factory=time.time)
 
+    @property
+    def name(self) -> str:
+        return self.title
+
+    @property
+    def path_or_url(self) -> str:
+        return self.url
+
+    @property
+    def timestamp(self) -> float:
+        return self.observed_at
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d["name"] = self.name
+        d["path_or_url"] = self.path_or_url
+        d["timestamp"] = self.timestamp
+        return d
+
+
+@dataclass
+class GitHubResultEntity:
+    """A real GitHub profile or repository observed in the browser DOM."""
+
+    ordinal: int
+    title: str
+    url: str
+    username: str | None = None
+    repo_name: str | None = None
+    type: Literal["github_user", "github_repo", "github_result"] = "github_result"
+    source: EntitySource = "browser_dom_cdp"
+    observed_at: float = field(default_factory=time.time)
+
+    @property
+    def name(self) -> str:
+        return self.username or self.repo_name or self.title
+
+    @property
+    def path_or_url(self) -> str:
+        return self.url
+
+    @property
+    def timestamp(self) -> float:
+        return self.observed_at
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["name"] = self.name
+        d["path_or_url"] = self.path_or_url
+        d["timestamp"] = self.timestamp
+        return d
 
 
 @dataclass
@@ -84,8 +224,24 @@ class WindowEntity:
     source: EntitySource = "os_window"
     observed_at: float = field(default_factory=time.time)
 
+    @property
+    def name(self) -> str:
+        return self.title
+
+    @property
+    def path_or_url(self) -> str:
+        return self.process_name
+
+    @property
+    def timestamp(self) -> float:
+        return self.observed_at
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d["name"] = self.name
+        d["path_or_url"] = self.path_or_url
+        d["timestamp"] = self.timestamp
+        return d
 
 
 @dataclass
@@ -100,8 +256,24 @@ class BrowserTabEntity:
     source: EntitySource = "browser_tab"
     observed_at: float = field(default_factory=time.time)
 
+    @property
+    def name(self) -> str:
+        return self.title
+
+    @property
+    def path_or_url(self) -> str:
+        return self.url
+
+    @property
+    def timestamp(self) -> float:
+        return self.observed_at
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d["name"] = self.name
+        d["path_or_url"] = self.path_or_url
+        d["timestamp"] = self.timestamp
+        return d
 
 
 @dataclass
@@ -131,7 +303,10 @@ class TypedContext:
 
     filesystem_results: list[FileSystemEntity] = field(default_factory=list)
     youtube_video_results: list[YouTubeVideoEntity] = field(default_factory=list)
+    youtube_channel_results: list[YouTubeChannelEntity] = field(default_factory=list)
+    youtube_playlist_results: list[YouTubePlaylistEntity] = field(default_factory=list)
     browser_search_results: list[BrowserResultEntity] = field(default_factory=list)
+    github_results: list[GitHubResultEntity] = field(default_factory=list)
     open_windows: list[WindowEntity] = field(default_factory=list)
     browser_tabs: list[BrowserTabEntity] = field(default_factory=list)
     recent_actions: list[ActionRecord] = field(default_factory=list)
@@ -148,13 +323,19 @@ class TypedContext:
 
     def clear_browser(self) -> None:
         self.youtube_video_results.clear()
+        self.youtube_channel_results.clear()
+        self.youtube_playlist_results.clear()
         self.browser_search_results.clear()
+        self.github_results.clear()
         self.browser_tabs.clear()
 
     def clear_all(self) -> None:
         self.filesystem_results.clear()
         self.youtube_video_results.clear()
+        self.youtube_channel_results.clear()
+        self.youtube_playlist_results.clear()
         self.browser_search_results.clear()
+        self.github_results.clear()
         self.open_windows.clear()
         self.browser_tabs.clear()
         self.recent_actions.clear()
@@ -165,12 +346,20 @@ class TypedContext:
         self.pending_action = None
 
     def restore_folder_entities(self, folder_path_or_name: str | None) -> bool:
-        """Restore cached filesystem entities when navigating back into a previously inspected folder."""
+        """Restore cached filesystem entities when navigating back into a folder."""
         if not folder_path_or_name:
             return False
-        clean_key = str(folder_path_or_name).strip().rstrip("/\\").replace("\\", "/").split("/")[-1].lower()
+        clean_key = (
+            str(folder_path_or_name)
+            .strip()
+            .rstrip("/\\")
+            .replace("\\", "/")
+            .split("/")[-1]
+            .lower()
+        )
         if clean_key in self.folder_contents_cache:
             self.filesystem_results = list(self.folder_contents_cache[clean_key])
+            self.clear_browser()
             self.last_active_domain = "filesystem"
             return True
         return False
@@ -181,14 +370,19 @@ class TypedContext:
         default_type: Literal["folder", "file"] = "file",
         base_dir: str | None = None,
     ) -> None:
-        """Store observed filesystem entities, computing 1-based ordinals."""
+        """Store observed filesystem entities, computing 1-based ordinals.
+
+        Clears browser/YouTube context so active File Explorer context is not contaminated.
+        """
         from pathlib import Path
 
+        self.clear_browser()
         results: list[FileSystemEntity] = []
         for idx, it in enumerate(items):
             if isinstance(it, str):
                 name = it
-                p = str(Path(base_dir or self.last_opened_folder or "") / it) if (base_dir or self.last_opened_folder) else it
+                target_base = base_dir or self.last_opened_folder or ""
+                p = str(Path(target_base) / it) if target_base else it
                 results.append(
                     FileSystemEntity(
                         ordinal=idx + 1,
@@ -214,7 +408,10 @@ class TypedContext:
         self.last_active_domain = "filesystem"
 
         # Cache folder contents under directory key
-        dir_to_cache = str(base_dir or self.last_opened_folder or "").strip().rstrip("/\\").replace("\\", "/").split("/")[-1].lower()
+        target_dir = str(base_dir or self.last_opened_folder or "")
+        dir_to_cache = (
+            target_dir.strip().rstrip("/\\").replace("\\", "/").split("/")[-1].lower()
+        )
         if dir_to_cache:
             self.folder_contents_cache[dir_to_cache] = list(results)
 
@@ -249,15 +446,32 @@ class TypedContext:
         ]
         self.last_active_domain = "browser"
 
+    def set_github_entities(self, items: list[dict[str, Any]]) -> None:
+        """Store observed GitHub profile or repository entities from DOM extraction."""
+        self.github_results = [
+            GitHubResultEntity(
+                ordinal=idx + 1,
+                title=it.get("title", it.get("name", "")),
+                url=it.get("url", ""),
+                username=it.get("username"),
+                repo_name=it.get("repo_name"),
+                type=it.get("type", "github_result"),
+                source="browser_dom_cdp",
+            )
+            for idx, it in enumerate(items)
+            if it.get("url")
+        ]
+        self.last_active_domain = "browser"
+
     def resolve_ordinal(
         self,
         ordinal: int,
         preferred_domain: str | None = None,
-    ) -> FileSystemEntity | YouTubeVideoEntity | BrowserResultEntity | None:
+    ) -> FileSystemEntity | YouTubeVideoEntity | BrowserResultEntity | GitHubResultEntity | None:
         """Resolve a 1-based ordinal reference ('the third one') based on active domain.
 
-        Never resolves a filesystem ordinal to a YouTube video or vice versa unless
-        explicitly compatible.
+        Never resolves a filesystem ordinal to a YouTube video or vice versa.
+        Strict domain separation prevents cross-contamination.
         """
         domain = preferred_domain or self.last_active_domain
 
@@ -265,30 +479,50 @@ class TypedContext:
             for item in self.filesystem_results:
                 if item.ordinal == ordinal:
                     return item
-        elif domain in ("youtube", "browser"):
+            return None
+
+        if domain in ("youtube", "browser"):
             for item in self.youtube_video_results:
                 if item.ordinal == ordinal:
                     return item
             for item in self.browser_search_results:
                 if item.ordinal == ordinal:
                     return item
-        elif domain == "window":
+            for item in self.github_results:
+                if item.ordinal == ordinal:
+                    return item
+            return None
+
+        if domain == "github":
+            for item in self.github_results:
+                if item.ordinal == ordinal:
+                    return item
+            return None
+
+        if domain == "window":
             for item in self.open_windows:
                 if item.ordinal == ordinal:
                     return item
+            return None
 
-        # Fallback to last active domain if not explicitly matched
+        # Fallback to last active domain with strict boundary
         if self.last_active_domain == "filesystem":
             for item in self.filesystem_results:
                 if item.ordinal == ordinal:
                     return item
-        elif self.last_active_domain == "browser":
+            return None
+
+        if self.last_active_domain == "browser":
             for item in self.youtube_video_results:
                 if item.ordinal == ordinal:
                     return item
             for item in self.browser_search_results:
                 if item.ordinal == ordinal:
                     return item
+            for item in self.github_results:
+                if item.ordinal == ordinal:
+                    return item
+            return None
 
         return None
 
@@ -296,7 +530,10 @@ class TypedContext:
         return {
             "filesystem_results": [it.to_dict() for it in self.filesystem_results],
             "youtube_video_results": [it.to_dict() for it in self.youtube_video_results],
+            "youtube_channel_results": [it.to_dict() for it in self.youtube_channel_results],
+            "youtube_playlist_results": [it.to_dict() for it in self.youtube_playlist_results],
             "browser_search_results": [it.to_dict() for it in self.browser_search_results],
+            "github_results": [it.to_dict() for it in self.github_results],
             "open_windows": [it.to_dict() for it in self.open_windows],
             "browser_tabs": [it.to_dict() for it in self.browser_tabs],
             "recent_actions": [it.to_dict() for it in self.recent_actions[-10:]],

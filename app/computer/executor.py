@@ -234,15 +234,15 @@ class HarnessDispatcher:
 
 
 # ---------------------------------------------------------------------------
-# ComputerAgent
+# ComputerExecutor (Legacy harness-based executor; renamed per Section 26)
 # ---------------------------------------------------------------------------
 
-class ComputerAgent:
-    """Plan → Act → Observe → Verify agent for desktop computer control.
+class ComputerExecutor:
+    """Plan → Act → Observe → Verify executor for desktop computer control.
 
     Usage:
-        agent = ComputerAgent()
-        async for event in agent.run(text, session=session):
+        executor = ComputerExecutor()
+        async for event in executor.run(text, session=session):
             yield event_to_ws(event)
     """
 
@@ -803,9 +803,17 @@ class ComputerAgent:
 
 
 # ---------------------------------------------------------------------------
-# Singleton for orchestrator use
+# Singleton and backward compatibility aliases
 # ---------------------------------------------------------------------------
 
-default_computer_agent = ComputerAgent()
+ComputerAgent = ComputerExecutor
+default_computer_executor = ComputerExecutor()
+default_computer_agent = default_computer_executor
 
-__all__ = ["ComputerAgent", "HarnessDispatcher", "default_computer_agent"]
+__all__ = [
+    "ComputerExecutor",
+    "ComputerAgent",
+    "HarnessDispatcher",
+    "default_computer_executor",
+    "default_computer_agent",
+]

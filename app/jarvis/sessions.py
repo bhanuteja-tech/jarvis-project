@@ -173,27 +173,86 @@ class Session:
 class ComputerSession(Session):
     """Session locked to the Computer Control domain.
 
-    Uses ComputerAgent and ComputerToolRegistry exclusively.
+    Uses ComputerAgent and ComputerToolRegistry exclusively with strict per-session state isolation.
     """
 
     domain: Domain = "computer"
+    _computer_state: Any = field(default=None, repr=False)
+    _task_manager: Any = field(default=None, repr=False)
+    _circuit_breaker: Any = field(default=None, repr=False)
+    _typed_ctx: Any = field(default=None, repr=False)
+    _browser_sess: Any = field(default=None, repr=False)
 
     @property
     def computer_state(self) -> Any:
-        from app.desktop.state import default_computer_state
-        return default_computer_state
+        if self._computer_state is None:
+            from app.desktop.state import ComputerState
+            self._computer_state = ComputerState()
+        return self._computer_state
+
+    @computer_state.setter
+    def computer_state(self, val: Any) -> None:
+        self._computer_state = val
+
+    @property
+    def typed_context(self) -> Any:
+        if self._typed_ctx is None:
+            from app.computer.context import TypedContext
+            self._typed_ctx = TypedContext()
+        return self._typed_ctx
+
+    @typed_context.setter
+    def typed_context(self, val: Any) -> None:
+        self._typed_ctx = val
+
+    @property
+    def circuit_breaker(self) -> Any:
+        if self._circuit_breaker is None:
+            from app.computer.circuit_breaker import ActionCircuitBreaker
+            self._circuit_breaker = ActionCircuitBreaker()
+        return self._circuit_breaker
+
+    @circuit_breaker.setter
+    def circuit_breaker(self, val: Any) -> None:
+        self._circuit_breaker = val
+
+    @property
+    def task_manager(self) -> Any:
+        if self._task_manager is None:
+            from app.agent.task_manager import TaskManager
+            self._task_manager = TaskManager()
+        return self._task_manager
+
+    @task_manager.setter
+    def task_manager(self, val: Any) -> None:
+        self._task_manager = val
+
+    @property
+    def browser_session(self) -> Any:
+        if self._browser_sess is None:
+            from app.desktop.browser_session import BrowserSession
+            self._browser_sess = BrowserSession()
+        return self._browser_sess
+
+    @browser_session.setter
+    def browser_session(self, val: Any) -> None:
+        self._browser_sess = val
 
     @property
     def tool_registry(self) -> Any:
-        from app.agent.tool_registry import computer_tool_registry
-        return computer_tool_registry
+        from app.computer.tools import default_computer_tool_registry
+        return default_computer_tool_registry
 
     @property
     def agent(self) -> Any:
         if self.computer_agent is not None:
             return self.computer_agent
-        from app.computer.agent import default_computer_agent
-        return default_computer_agent
+        from app.computer.agent import ComputerAgent
+        self.computer_agent = ComputerAgent(
+            state=self.computer_state,
+            typed_context=self.typed_context,
+        )
+        return self.computer_agent
 
 
 @dataclass
@@ -231,7 +290,9 @@ class InMemorySessionStore:
         if key not in self._sessions:
             now_iso = datetime.now(UTC).isoformat()
             if domain == "computer":
-                sess: Session = ComputerSession(session_id=key, created_at=now_iso, domain="computer")
+                sess: Session = ComputerSession(
+                    session_id=key, created_at=now_iso, domain="computer"
+                )
             else:
                 sess = CareerSession(session_id=key, created_at=now_iso, domain="career")
             if lock:
