@@ -1,400 +1,410 @@
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Mic,
   ArrowRight,
+  ShieldAlert,
   ShieldCheck,
-  Cpu,
-  Target,
-  FileCheck,
-  Search,
+  Check,
+  X,
+  Clock,
+  Terminal,
+  Laptop,
   CheckCircle2,
   XCircle,
-  HelpCircle
+  AlertTriangle,
+  Eye,
+  Key
 } from 'lucide-react'
-import { AgentDemoVisualizer } from '../components/public/AgentDemoVisualizer'
-import { VoiceStateDemo } from '../components/public/VoiceStateDemo'
-import { ArchitectureGraph } from '../components/public/ArchitectureGraph'
-import { PipelineVisualizer } from '../components/public/PipelineVisualizer'
-import { ProductPreviewCard } from '../components/public/ProductPreviewCard'
-
-const CAPABILITIES = [
-  {
-    icon: Mic,
-    title: 'Sovereign Voice & Barge-in',
-    tag: '180ms TTFT',
-    description: 'Natural voice interaction with sub-18ms interruption handling. Speak freely; JARVIS stops talking the instant you speak.',
-    accent: 'from-blue-500/20 to-cyan-500/10',
-    border: 'border-cyan-500/30',
-  },
-  {
-    icon: Search,
-    title: 'Multi-Source Radar',
-    tag: 'Greenhouse · Lever · Google',
-    description: 'Scrapes and normalizes authentic postings across primary ATS platforms. Deduplicates postings and extracts verifiable requirements.',
-    accent: 'from-indigo-500/20 to-blue-500/10',
-    border: 'border-blue-500/30',
-  },
-  {
-    icon: Cpu,
-    title: 'Untrusted JD Understanding',
-    tag: 'Strict Provenance',
-    description: 'Treats job descriptions as untrusted text. Extracts required skills, experience thresholds, and salary markers with evidence tags.',
-    accent: 'from-violet-500/20 to-purple-500/10',
-    border: 'border-violet-500/30',
-  },
-  {
-    icon: Target,
-    title: '8-Factor Deterministic Match',
-    tag: 'Transparent Math',
-    description: 'Fixed-weight scoring model (Required 30, Preferred 10, Experience 20, Location 12, etc.). No black-box embeddings or phantom rejections.',
-    accent: 'from-emerald-500/20 to-teal-500/10',
-    border: 'border-emerald-500/30',
-  },
-  {
-    icon: FileCheck,
-    title: 'Truth-Guarded Tailoring',
-    tag: 'Subset Enforced',
-    description: 'Re-aligns resume highlights and synthesizes targeted summaries exclusively from your verified profile evidence. Zero invented claims.',
-    accent: 'from-cyan-500/20 to-blue-500/10',
-    border: 'border-cyan-500/30',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'ATS Audit & PII Quarantine',
-    tag: 'T1–T10 & A1–A8',
-    description: 'Rigorous 10-point mathematical truth verification and 8-point ATS compliance check. Contact PII is quarantined from narration contexts.',
-    accent: 'from-amber-500/20 to-orange-500/10',
-    border: 'border-amber-500/30',
-  },
-]
-
-const COMPARISON_ROWS = [
-  {
-    feature: 'Hallucination Prevention',
-    jarvis: 'Mathematical Token Containment Guard (T1–T10) guarantees 0% invented claims',
-    chatbots: 'High risk of inventing dates, skills, and metrics to please user',
-    jobBoards: 'N/A (static keyword matching)',
-  },
-  {
-    feature: 'Scoring Transparency',
-    jarvis: 'Deterministic 8-factor math with exact percentage breakdown',
-    chatbots: 'Opaque black-box reasoning; unpredictable re-runs',
-    jobBoards: 'Hidden sponsored ranking algorithms',
-  },
-  {
-    feature: 'Voice Interruption (Barge-in)',
-    jarvis: '< 18ms client-side audio cutoff & clean connection renewal',
-    chatbots: 'Laggy or unavailable; full audio clip must finish playing',
-    jobBoards: 'None',
-  },
-  {
-    feature: 'Job Source Integrity',
-    jarvis: 'Direct public ATS adapters (Greenhouse, Lever) + Google Jobs deduplication',
-    chatbots: 'Stale web search or fabricated job links',
-    jobBoards: 'Cluttered with expired sponsored listings and scrapers',
-  },
-  {
-    feature: 'Candidate Privacy',
-    jarvis: 'Strict PII quarantine; contact data never enters narration or model contexts',
-    chatbots: 'Sends full resumes with phone/address to third-party model APIs',
-    jobBoards: 'Monetizes candidate resume data to third-party recruiters',
-  },
-]
 
 export function LandingPage() {
+  // Interactive Safety Simulator state (default 120s confirmation review budget)
+  const [simState, setSimState] = useState<'pending' | 'declined' | 'authorized'>('pending')
+  const [simTimer, setSimTimer] = useState<number>(120)
+
+  useEffect(() => {
+    if (simState !== 'pending') return
+    const interval = setInterval(() => {
+      setSimTimer((t) => {
+        if (t <= 1) {
+          setSimState('declined')
+          return 0
+        }
+        return t - 1
+      })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [simState])
+
+  const handleResetSim = () => {
+    setSimState('pending')
+    setSimTimer(120)
+  }
+
   return (
-    <div className="space-y-24 pb-20">
-      {/* 1. HERO SECTION */}
-      <section className="relative px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto pt-8 sm:pt-14">
-        <div className="text-center space-y-6 max-w-4xl mx-auto">
-          {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full glass border border-blue-500/30 text-xs font-mono font-medium text-cyan-300 shadow-lg shadow-blue-500/10 animate-fade-in">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-            <span>SOVEREIGN VOICE AI & AUTONOMOUS CAREER OPERATING SYSTEM</span>
+    <div className="min-h-screen bg-[#0E1013] text-[#E1E4EA] selection:bg-[#D97736]/20 selection:text-[#E1E4EA]">
+      {/* Top Engineering Rail */}
+      <div className="border-b border-[#262B35] bg-[#16191E] px-4 sm:px-8 py-3 text-xs flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-[#2EA069]" />
+            <span className="font-semibold tracking-wide text-[#E1E4EA]">JARVIS</span>
+          </div>
+          <span className="text-[#828997] hidden sm:inline">|</span>
+          <span className="text-[#828997] font-mono text-[11px] hidden sm:inline">
+            Local Computer Controller
+          </span>
+        </div>
+
+        <div className="flex items-center gap-4 text-[#828997] text-[11px]">
+          <span className="hidden md:inline font-mono">Device-Bound Security</span>
+          <Link
+            to="/docs"
+            className="hover:text-[#E1E4EA] transition-colors"
+          >
+            Safety Docs
+          </Link>
+          <Link
+            to="/app/computer"
+            className="text-[#D97736] hover:underline font-medium"
+          >
+            Open Console →
+          </Link>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      <main className="max-w-6xl mx-auto px-4 sm:px-8 py-12 md:py-16 space-y-20">
+        {/* 1. HERO SECTION (Strict Left-Aligned) */}
+        <section className="space-y-6 max-w-3xl">
+          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded bg-[#16191E] border border-[#262B35] text-xs font-mono text-[#D97736]">
+            <ShieldCheck size={14} />
+            <span>Permission-Gated Autonomous Agent</span>
           </div>
 
-          {/* Headline */}
-          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-white leading-[1.1]">
-            Real-Time Voice Intelligence. <br />
-            <span className="text-gradient-cyan">Deterministic Career Execution.</span>
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight text-[#E1E4EA] leading-[1.15] font-sans">
+            An autonomous agent with hands on your computer. <br className="hidden sm:inline" />
+            <span className="text-[#828997]">Governed by your explicit permission.</span>
           </h1>
 
-          {/* Subhead */}
-          <p className="text-base sm:text-lg lg:text-xl text-jarvis-muted leading-relaxed max-w-3xl mx-auto font-normal">
-            Stop wrestling with black-box chatbots and hallucinated resumes. JARVIS connects natural conversational voice to an 8-stage LangGraph pipeline that hunts real jobs, scores fit with pure math, and tailors resumes with mathematical truth containment.
+          <p className="text-base sm:text-lg text-[#828997] leading-relaxed max-w-2xl font-normal">
+            You instruct in plain voice or text. Jarvis operates your browser, organizes your filesystem,
+            and runs desktop tools directly on your physical machine. When an action could delete data,
+            send a message, or modify system files, it halts and waits for your confirmation.
           </p>
 
-          {/* CTA Buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 pt-2">
+          <div className="flex flex-wrap items-center gap-3 pt-2">
             <Link
-              to="/app"
-              className="w-full sm:w-auto px-7 py-3.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-sm shadow-xl shadow-blue-600/30 flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98]"
+              to="/app/computer"
+              className="px-5 py-2.5 rounded bg-[#D97736] hover:bg-[#D97736]/90 text-[#0E1013] font-medium text-sm flex items-center gap-2 transition-colors focus-visible:ring-2 focus-visible:ring-[#D97736]"
             >
-              <span>Launch Application</span>
-              <ArrowRight size={16} />
+              <span>Open Control Console</span>
+              <ArrowRight size={15} />
             </Link>
 
-            <Link
-              to="/voice-agent"
-              className="w-full sm:w-auto px-6 py-3.5 rounded-xl glass hover:bg-jarvis-surface text-jarvis-light hover:text-white font-semibold text-sm border border-jarvis-border/60 flex items-center justify-center gap-2 transition-all"
+            <a
+              href="#safety-interlock"
+              className="px-4 py-2.5 rounded bg-[#16191E] hover:bg-[#262B35] text-[#E1E4EA] border border-[#262B35] text-sm font-medium transition-colors"
             >
-              <Mic size={16} className="text-cyan-400" />
-              <span>Voice Agent Showcase</span>
-            </Link>
-
-            <Link
-              to="/docs"
-              className="w-full sm:w-auto px-5 py-3.5 rounded-xl text-jarvis-muted hover:text-white text-sm font-medium transition-colors"
-            >
-              Documentation →
-            </Link>
+              How Permission Works
+            </a>
           </div>
-        </div>
+        </section>
 
-        {/* Hero Interactive Agent Visualizer */}
-        <div className="mt-12 sm:mt-16 max-w-5xl mx-auto">
-          <AgentDemoVisualizer />
-        </div>
-      </section>
-
-      {/* 2. LIVE METRICS STRIP */}
-      <section className="border-y border-jarvis-border/40 bg-jarvis-surface/20 py-8 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-2 lg:grid-cols-4 gap-6 text-center">
-          <div className="space-y-1">
-            <div className="text-2xl sm:text-3xl font-extrabold font-mono text-cyan-400">100%</div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-white">Truth Guard Containment</div>
-            <p className="text-[11px] text-jarvis-muted">C_tailored ⊆ C_candidate verified</p>
-          </div>
-
-          <div className="space-y-1">
-            <div className="text-2xl sm:text-3xl font-extrabold font-mono text-emerald-400">~180ms</div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-white">Voice TTFT Latency</div>
-            <p className="text-[11px] text-jarvis-muted">FastIntentRouter sub-45ms dispatch</p>
-          </div>
-
-          <div className="space-y-1">
-            <div className="text-2xl sm:text-3xl font-extrabold font-mono text-blue-400">8 Stages</div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-white">Frozen LangGraph Pipeline</div>
-            <p className="text-[11px] text-jarvis-muted">Phases 1–6 deterministic engine</p>
-          </div>
-
-          <div className="space-y-1">
-            <div className="text-2xl sm:text-3xl font-extrabold font-mono text-violet-400">0%</div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-white">Hallucination Tolerance</div>
-            <p className="text-[11px] text-jarvis-muted">T1-T10 audits fail on fabricated claims</p>
-          </div>
-        </div>
-      </section>
-
-      {/* 3. 6 CORE CAPABILITIES GRID */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
-        <div className="text-center space-y-3 max-w-3xl mx-auto">
-          <div className="text-xs font-mono uppercase tracking-widest text-cyan-400 font-bold">
-            ARCHITECTED FOR SOVEREIGNTY
-          </div>
-          <h2 className="text-3xl sm:text-4xl font-bold text-white tracking-tight">
-            Six Autonomous Pillars of Career Intelligence
-          </h2>
-          <p className="text-sm sm:text-base text-jarvis-muted leading-relaxed">
-            Every layer is engineered to remove guesswork, eliminate fabricated resume claims, and respect your privacy.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {CAPABILITIES.map((cap) => {
-            const Icon = cap.icon
-            return (
-              <div
-                key={cap.title}
-                className={`p-6 rounded-2xl glass hover:border-blue-500/50 transition-all duration-300 group border ${cap.border} flex flex-col justify-between space-y-4`}
+        {/* 2. THE LIVE SAFETY INTERLOCK SIMULATOR */}
+        <section id="safety-interlock" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold tracking-wide text-[#E1E4EA] font-sans">
+                The Confirmation Barrier in Action
+              </h2>
+              <p className="text-xs text-[#828997]">
+                Try the exact decision screen that appears before high-risk actions execute on your computer.
+              </p>
+            </div>
+            {simState !== 'pending' && (
+              <button
+                onClick={handleResetSim}
+                className="text-xs text-[#D97736] hover:underline font-mono"
               >
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600/30 to-violet-600/20 border border-blue-500/30 flex items-center justify-center group-hover:scale-110 transition-transform">
-                      <Icon className="text-cyan-400" size={22} />
-                    </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-jarvis-surface text-cyan-300 border border-jarvis-border/50">
-                      {cap.tag}
+                Reset demo
+              </button>
+            )}
+          </div>
+
+          <div className="border border-[#262B35] bg-[#16191E] rounded p-5 space-y-4">
+            {simState === 'pending' ? (
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#262B35] gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1 rounded bg-[#D97736]/15 text-[#D97736]">
+                      <ShieldAlert size={16} />
                     </span>
+                    <div>
+                      <span className="text-xs font-semibold text-[#E1E4EA]">
+                        Confirmation Required: Destructive Action
+                      </span>
+                      <p className="text-[11px] text-[#828997]">
+                        The local agent has suspended execution until you approve or decline.
+                      </p>
+                    </div>
                   </div>
 
-                  <div>
-                    <h3 className="text-lg font-bold text-white group-hover:text-cyan-300 transition-colors">
-                      {cap.title}
-                    </h3>
-                    <p className="text-xs sm:text-sm text-jarvis-muted mt-2 leading-relaxed">
-                      {cap.description}
-                    </p>
+                  <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-[#0E1013] border border-[#262B35] font-mono text-[11px] text-[#D97736] self-start sm:self-auto">
+                    <Clock size={12} className="animate-pulse" />
+                    <span>{simTimer}s until automatic timeout</span>
                   </div>
                 </div>
 
-                <div className="pt-3 border-t border-jarvis-border/30 flex items-center text-xs font-medium text-cyan-400 group-hover:translate-x-1 transition-transform">
-                  <span>Explore capability details →</span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-[#0E1013] p-3 rounded border border-[#262B35]">
+                  <div>
+                    <span className="text-[#828997] block font-mono text-[11px]">Command</span>
+                    <span className="font-mono text-[#E1E4EA]">delete_directory</span>
+                  </div>
+                  <div>
+                    <span className="text-[#828997] block font-mono text-[11px]">Target path</span>
+                    <span className="font-mono text-[#E1E4EA]">~/Projects/drafts</span>
+                  </div>
+                  <div>
+                    <span className="text-[#828997] block font-mono text-[11px]">Blast radius</span>
+                    <span className="text-[#E2604E] font-medium">14 files permanently removed</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button
+                    onClick={() => setSimState('declined')}
+                    className="flex items-center gap-2 px-4 py-2 text-xs font-medium text-[#E1E4EA] bg-[#0E1013] hover:bg-[#262B35] border border-[#262B35] rounded transition-colors"
+                  >
+                    <X size={14} className="text-[#E2604E]" />
+                    <span>Decline action</span>
+                    <kbd className="px-1 text-[9px] font-mono text-[#828997] bg-[#16191E] rounded border border-[#262B35]">
+                      Esc
+                    </kbd>
+                  </button>
+
+                  <button
+                    onClick={() => setSimState('authorized')}
+                    className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-[#0E1013] bg-[#D97736] hover:bg-[#D97736]/90 rounded transition-colors"
+                  >
+                    <Check size={14} />
+                    <span>Authorize execution</span>
+                    <kbd className="px-1 text-[9px] font-mono text-[#0E1013]/80 bg-white/20 rounded">
+                      Enter
+                    </kbd>
+                  </button>
                 </div>
               </div>
-            )
-          })}
-        </div>
-      </section>
-
-      {/* 4. PRODUCT DASHBOARD PREVIEW */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-        <div className="text-center space-y-3 max-w-2xl mx-auto">
-          <span className="text-xs font-mono uppercase tracking-widest text-blue-400 font-bold">
-            FULL WORKSPACE EXPERIENCE
-          </span>
-          <h2 className="text-3xl sm:text-4xl font-bold text-white tracking-tight">
-            The Three-Panel Unified Dashboard
-          </h2>
-          <p className="text-xs sm:text-sm text-jarvis-muted leading-relaxed">
-            Real-time conversational voice, glowing AI Core state machine, and dedicated multi-tab workspaces for job radar, matching math, and PDF document studio.
-          </p>
-        </div>
-
-        <ProductPreviewCard />
-      </section>
-
-      {/* 5. 8-STAGE LANGGRAPH PIPELINE */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-        <PipelineVisualizer />
-      </section>
-
-      {/* 6. VOICE ENGINE SHOWCASE */}
-      <section id="voice-demo" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-        <VoiceStateDemo />
-      </section>
-
-      {/* 7. ARCHITECTURE TOPOLOGY */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-        <ArchitectureGraph />
-      </section>
-
-      {/* 8. COMPARISON MATRIX */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-        <div className="text-center space-y-3 max-w-2xl mx-auto">
-          <span className="text-xs font-mono uppercase tracking-widest text-emerald-400 font-bold">
-            ARCHITECTURAL HONESTY
-          </span>
-          <h2 className="text-3xl sm:text-4xl font-bold text-white tracking-tight">
-            Why Deterministic AI Outclasses Generic LLMs
-          </h2>
-          <p className="text-xs sm:text-sm text-jarvis-muted leading-relaxed">
-            We reject fuzzy reasoning for critical career decisions. Here is how JARVIS compares to common chatbots and legacy job aggregators.
-          </p>
-        </div>
-
-        <div className="overflow-x-auto rounded-2xl glass border border-jarvis-border/60">
-          <table className="w-full text-left text-xs sm:text-sm border-collapse">
-            <thead>
-              <tr className="border-b border-jarvis-border/60 bg-jarvis-surface/60 font-mono text-xs">
-                <th className="p-4 sm:p-5 text-white font-bold">Dimension</th>
-                <th className="p-4 sm:p-5 text-cyan-300 font-bold bg-blue-950/20">J.A.R.V.I.S (Sovereign OS)</th>
-                <th className="p-4 sm:p-5 text-jarvis-muted">Generic Chatbots</th>
-                <th className="p-4 sm:p-5 text-jarvis-muted">Traditional Job Boards</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-jarvis-border/30">
-              {COMPARISON_ROWS.map((row) => (
-                <tr key={row.feature} className="hover:bg-jarvis-surface/30 transition-colors">
-                  <td className="p-4 sm:p-5 font-semibold text-white">{row.feature}</td>
-                  <td className="p-4 sm:p-5 text-cyan-200 bg-blue-950/20 font-medium">
-                    <div className="flex items-start gap-2">
-                      <CheckCircle2 size={16} className="text-cyan-400 shrink-0 mt-0.5" />
-                      <span>{row.jarvis}</span>
-                    </div>
-                  </td>
-                  <td className="p-4 sm:p-5 text-jarvis-muted">
-                    <div className="flex items-start gap-2">
-                      <XCircle size={16} className="text-red-400/70 shrink-0 mt-0.5" />
-                      <span>{row.chatbots}</span>
-                    </div>
-                  </td>
-                  <td className="p-4 sm:p-5 text-jarvis-muted">
-                    <div className="flex items-start gap-2">
-                      <HelpCircle size={16} className="text-yellow-500/70 shrink-0 mt-0.5" />
-                      <span>{row.jobBoards}</span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {/* 9. TARGET AUDIENCE */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-        <div className="text-center space-y-3 max-w-2xl mx-auto">
-          <span className="text-xs font-mono uppercase tracking-widest text-violet-400 font-bold">
-            ENGINEERED FOR HIGH-IMPACT TALENT
-          </span>
-          <h2 className="text-3xl sm:text-4xl font-bold text-white tracking-tight">
-            Built for Professionals Who Demand Precision
-          </h2>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="p-6 rounded-2xl glass border border-jarvis-border/60 space-y-3">
-            <h3 className="text-base font-bold text-white">Staff & Principal Engineers</h3>
-            <p className="text-xs sm:text-sm text-jarvis-muted leading-relaxed">
-              Cut through recruiter noise. Target specific distributed systems, Kubernetes, and high-throughput architectures without losing control of your credentials.
-            </p>
+            ) : simState === 'declined' ? (
+              <div className="p-4 rounded bg-[#E2604E]/10 border border-[#E2604E]/30 text-xs space-y-2">
+                <div className="flex items-center gap-2 text-[#E2604E] font-medium">
+                  <XCircle size={16} />
+                  <span>Action declined by user — task aborted cleanly.</span>
+                </div>
+                <p className="text-[#828997] text-[11px]">
+                  Zero files were modified on your filesystem. The agent dropped the queued step, returned to standby, and reported the cancellation safely.
+                </p>
+              </div>
+            ) : (
+              <div className="p-4 rounded bg-[#2EA069]/10 border border-[#2EA069]/30 text-xs space-y-2">
+                <div className="flex items-center gap-2 text-[#2EA069] font-medium">
+                  <CheckCircle2 size={16} />
+                  <span>Action authorized — execution completed and verified.</span>
+                </div>
+                <p className="text-[#828997] text-[11px]">
+                  The local agent executed the deletion on your machine and inspected the directory to verify the outcome before reporting back.
+                </p>
+              </div>
+            )}
           </div>
+        </section>
 
-          <div className="p-6 rounded-2xl glass border border-jarvis-border/60 space-y-3">
-            <h3 className="text-base font-bold text-white">AI & ML Research Practitioners</h3>
-            <p className="text-xs sm:text-sm text-jarvis-muted leading-relaxed">
-              Surface roles with explicit GPU cluster management, CUDA kernel optimization, and LLM orchestration requirements matched directly against your publications.
-            </p>
-          </div>
-
-          <div className="p-6 rounded-2xl glass border border-jarvis-border/60 space-y-3">
-            <h3 className="text-base font-bold text-white">Technical Leaders & Architects</h3>
-            <p className="text-xs sm:text-sm text-jarvis-muted leading-relaxed">
-              Verify executive competencies and compensation boundaries transparently without risking sensitive profile details across public aggregators.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* 10. FINAL CTA BANNER */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="p-8 sm:p-12 lg:p-16 rounded-3xl bg-gradient-to-br from-blue-900/40 via-indigo-950/50 to-jarvis-darker border border-blue-500/40 shadow-2xl shadow-blue-950/60 relative overflow-hidden text-center space-y-6">
-          {/* Ambient light inside banner */}
-          <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-96 h-96 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none" />
-
-          <div className="relative z-10 space-y-3 max-w-2xl mx-auto">
-            <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-              Ready to take sovereign control of your career search?
+        {/* 3. UNNUMBERED TRIPTYCH: THE THREE ARCHITECTURAL GUARANTEES */}
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold tracking-wide text-[#E1E4EA] font-sans">
+              Three Architectural Guarantees
             </h2>
-            <p className="text-sm sm:text-base text-cyan-200/80 leading-relaxed">
-              Launch the JARVIS dashboard immediately. Experience voice orchestration, transparent mathematical scoring, and 100% truth-guarded resume generation.
+            <p className="text-xs text-[#828997]">
+              Engineered constraints that make granting computer control safe.
             </p>
           </div>
 
-          <div className="relative z-10 flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
-            <Link
-              to="/app"
-              className="px-8 py-3.5 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-400 hover:from-blue-400 hover:to-cyan-300 text-slate-950 font-bold text-sm shadow-xl shadow-cyan-500/25 flex items-center gap-2 transition-all hover:scale-105 active:scale-95"
-            >
-              <span>Launch JARVIS App Now</span>
-              <ArrowRight size={16} />
-            </Link>
-            <Link
-              to="/features"
-              className="px-6 py-3.5 rounded-xl glass hover:bg-jarvis-surface text-white text-sm font-semibold border border-jarvis-border/60 transition-colors"
-            >
-              Explore Full Features Matrix
-            </Link>
+          <div className="grid grid-cols-1 md:grid-cols-3 border border-[#262B35] divide-y md:divide-y-0 md:divide-x divide-[#262B35] bg-[#16191E] rounded">
+            {/* Card 1: Local Machine Execution */}
+            <div className="p-5 space-y-3">
+              <div className="w-8 h-8 rounded bg-[#0E1013] border border-[#262B35] flex items-center justify-center text-[#828997]">
+                <Laptop size={16} />
+              </div>
+              <h3 className="text-sm font-semibold text-[#E1E4EA]">Local machine execution</h3>
+              <p className="text-xs text-[#828997] leading-relaxed">
+                Jarvis operates directly on your physical machine through the lightweight local agent (<code className="text-[#E1E4EA] font-mono text-[11px]">jarvis_agent</code>). Your personal files, cookies, and local credentials stay on your laptop and are never uploaded to a shared server.
+              </p>
+            </div>
+
+            {/* Card 2: Physical Human Veto */}
+            <div className="p-5 space-y-3">
+              <div className="w-8 h-8 rounded bg-[#0E1013] border border-[#262B35] flex items-center justify-center text-[#D97736]">
+                <Key size={16} />
+              </div>
+              <h3 className="text-sm font-semibold text-[#E1E4EA]">Physical human veto</h3>
+              <p className="text-xs text-[#828997] leading-relaxed">
+                Destructive operations (deleting files, dispatching external messages, running scripts) freeze and wait for your explicit authorization. Automatic approval cannot be enabled by default and requires a deliberate safety flag.
+              </p>
+            </div>
+
+            {/* Card 3: Zero-Guess Grounding */}
+            <div className="p-5 space-y-3">
+              <div className="w-8 h-8 rounded bg-[#0E1013] border border-[#262B35] flex items-center justify-center text-[#2EA069]">
+                <Eye size={16} />
+              </div>
+              <h3 className="text-sm font-semibold text-[#E1E4EA]">Zero-guess grounding</h3>
+              <p className="text-xs text-[#828997] leading-relaxed">
+                The agent never assumes an action succeeded. It inspects verified window titles, process IDs, and filesystem changes before and after every step. If reality does not match the expected state, it stops and asks.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* 4. WHAT HAPPENS WHEN THINGS GO WRONG */}
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold tracking-wide text-[#E1E4EA] font-sans">
+              What Happens When Things Go Wrong
+            </h2>
+            <p className="text-xs text-[#828997]">
+              Real-world computers experience sleep modes, Wi-Fi drops, and accidental inputs. Here is how Jarvis behaves under pressure.
+            </p>
           </div>
 
-          <div className="relative z-10 flex items-center justify-center gap-6 text-[11px] text-jarvis-muted font-mono pt-4">
-            <span>✓ Zero Credit Card Required</span>
-            <span>✓ Instant Guest / Demo Mode</span>
-            <span>✓ 100% Open Architecture</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 rounded bg-[#16191E] border border-[#262B35] space-y-2 text-xs">
+              <span className="font-semibold text-[#E1E4EA] flex items-center gap-2">
+                <Clock size={14} className="text-[#D97736]" />
+                When your connection drops mid-task
+              </span>
+              <p className="text-[#828997] leading-relaxed text-[11px]">
+                A 15-second grace period timer starts. If your computer wakes or Wi-Fi reconnects within that window, your task resumes seamlessly. If the deadline expires without reconnection, all pending in-flight tasks fail safe rather than executing blindly.
+              </p>
+            </div>
+
+            <div className="p-4 rounded bg-[#16191E] border border-[#262B35] space-y-2 text-xs">
+              <span className="font-semibold text-[#E1E4EA] flex items-center gap-2">
+                <Laptop size={14} className="text-[#2EA069]" />
+                When another device logs in
+              </span>
+              <p className="text-[#828997] leading-relaxed text-[11px]">
+                Every connection is bound to a persistent hardware device identifier. A second laptop under your account cannot silently hijack or resolve actions meant for your primary machine; duplicate registrations are rejected with policy violations.
+              </p>
+            </div>
+
+            <div className="p-4 rounded bg-[#16191E] border border-[#262B35] space-y-2 text-xs">
+              <span className="font-semibold text-[#E1E4EA] flex items-center gap-2">
+                <AlertTriangle size={14} className="text-[#E2604E]" />
+                When an action fails or gets stuck
+              </span>
+              <p className="text-[#828997] leading-relaxed text-[11px]">
+                Instead of retrying in a loop or fabricating a completion report, the circuit breaker opens, drops remaining queued steps, and reports the exact operating system error back to you so you stay in control.
+              </p>
+            </div>
+
+            <div className="p-4 rounded bg-[#16191E] border border-[#262B35] space-y-2 text-xs">
+              <span className="font-semibold text-[#E1E4EA] flex items-center gap-2">
+                <Terminal size={14} className="text-[#828997]" />
+                When you speak while Jarvis is talking
+              </span>
+              <p className="text-[#828997] leading-relaxed text-[11px]">
+                Audio generation cuts off in under 18ms the instant you start speaking. The agent halts its narration immediately, listens to your correction, and adapts without requiring you to wait for a long voice prompt to finish.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* 5. HONEST COMPARISON */}
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold tracking-wide text-[#E1E4EA] font-sans">
+              How Jarvis Compares
+            </h2>
+            <p className="text-xs text-[#828997]">
+              Why direct computer control requires an architecture fundamentally different from cloud chatbots.
+            </p>
+          </div>
+
+          <div className="border border-[#262B35] bg-[#16191E] rounded overflow-hidden text-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-[#262B35] bg-[#0E1013] text-[#828997] font-mono text-[11px]">
+                    <th className="p-3 font-medium">Capability</th>
+                    <th className="p-3 font-medium text-[#D97736]">Jarvis</th>
+                    <th className="p-3 font-medium">Cloud Chatbots</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#262B35] text-[#828997]">
+                  <tr>
+                    <td className="p-3 font-medium text-[#E1E4EA]">Machine Execution</td>
+                    <td className="p-3 text-[#2EA069]">Runs on your actual OS via local agent</td>
+                    <td className="p-3">Isolated cloud sandbox with no local access</td>
+                  </tr>
+                  <tr>
+                    <td className="p-3 font-medium text-[#E1E4EA]">High-Risk Veto</td>
+                    <td className="p-3 text-[#2EA069]">Physical confirmation prompt for deletions/sends</td>
+                    <td className="p-3">N/A (cannot touch real files)</td>
+                  </tr>
+                  <tr>
+                    <td className="p-3 font-medium text-[#E1E4EA]">State Grounding</td>
+                    <td className="p-3 text-[#2EA069]">Inspects real HWNDs, URLs, and folders</td>
+                    <td className="p-3">Guesses state from prompt memory</td>
+                  </tr>
+                  <tr>
+                    <td className="p-3 font-medium text-[#E1E4EA]">Voice Barge-in</td>
+                    <td className="p-3 text-[#2EA069]">Instant sub-18ms interruption cutoff</td>
+                    <td className="p-3">Audio must finish before next turn</td>
+                  </tr>
+                  <tr>
+                    <td className="p-3 font-medium text-[#E1E4EA]">Device Identity</td>
+                    <td className="p-3 text-[#2EA069]">Hardware-bound token prevents cross-machine takeovers</td>
+                    <td className="p-3">Shared web session without device gating</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* 6. LOCAL AGENT QUICKSTART */}
+        <section className="p-5 rounded bg-[#16191E] border border-[#262B35] space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-[#E1E4EA] font-sans">
+              Connect Your Machine
+            </h2>
+            <span className="text-[11px] font-mono text-[#828997]">CLI Quickstart</span>
+          </div>
+
+          <p className="text-xs text-[#828997]">
+            Launch the local companion on your computer. It connects securely over WebSocket to receive and execute approved actions.
+          </p>
+
+          <div className="p-3 rounded bg-[#0E1013] border border-[#262B35] font-mono text-xs text-[#E1E4EA] flex items-center justify-between overflow-x-auto">
+            <code>pip install -e . && python -m jarvis_agent.cli --session-id &lt;session&gt; --token &lt;token&gt;</code>
+          </div>
+        </section>
+      </main>
+
+      {/* Bottom Footer */}
+      <footer className="border-t border-[#262B35] py-6 px-4 sm:px-8 text-xs text-[#828997] bg-[#16191E]">
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#2EA069]" />
+            <span>JARVIS Autonomous Computer Control — Verified Execution Architecture</span>
+          </div>
+          <div className="flex items-center gap-4 text-[11px]">
+            <Link to="/app/computer" className="hover:text-[#E1E4EA]">Control Console</Link>
+            <Link to="/docs" className="hover:text-[#E1E4EA]">Documentation</Link>
+            <Link to="/features" className="hover:text-[#E1E4EA]">Capabilities</Link>
           </div>
         </div>
-      </section>
+      </footer>
     </div>
   )
 }

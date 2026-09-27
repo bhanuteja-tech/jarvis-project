@@ -598,12 +598,22 @@ export function useWebSocket(wsPath?: string) {
         break
       }
 
+      case 'action_request':
       case 'computer_needs_confirm':
       case 'confirmation_required': {
-        store.setComputerState({ needsConfirm: true })
+        const requiresConfirm = data.requires_confirmation ?? true
+        store.setComputerState({
+          needsConfirm: requiresConfirm,
+          confirmationTimeoutSeconds: data.confirmation_timeout_seconds ?? (requiresConfirm ? 120 : null),
+          timeoutSeconds: data.timeout_seconds ?? 30,
+          target: data.target || data.tool || data.params?.path || data.params?.url,
+          blastRadius: data.blast_radius || data.confirmation_prompt || data.description,
+          dangerLevel: data.danger_level || (data.tool?.includes('delete') ? 'critical' : 'high'),
+          taskId: data.action_id || data.task_id,
+        })
         store.addActivity({
           id: `confirm-${envelope.seq}`,
-          label: `⚠️ Needs confirmation: ${data.description || ''}`,
+          label: `⚠️ Needs confirmation: ${data.confirmation_prompt || data.description || data.tool || ''}`,
           status: 'active',
           timestamp: Date.now(),
         })
@@ -616,6 +626,7 @@ export function useWebSocket(wsPath?: string) {
           lastVerified: data.verified ?? null,
           lastResponse: data.text || '',
           needsConfirm: data.needs_confirm ?? false,
+          confirmationTimeoutSeconds: data.needs_confirm ? (data.confirmation_timeout_seconds ?? 120) : null,
         })
         if (!data.needs_confirm) {
           store.setAiCoreState('idle')

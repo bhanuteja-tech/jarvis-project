@@ -17,7 +17,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.api.routes.auth import router as auth_router
 from app.api.routes.health import router as health_router
 from app.api.routes.jarvis import router as jarvis_router
 from app.api.routes.llm import router as llm_router
@@ -27,9 +29,6 @@ from app.db.session import create_db_engine
 from app.logging_setup import configure_logging
 
 logger = logging.getLogger(__name__)
-
-
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 class SPAStaticFiles(StaticFiles):
@@ -80,6 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     application.include_router(health_router)
+    application.include_router(auth_router)
     application.include_router(jarvis_router)
     application.include_router(llm_router)
     application.include_router(voice_router)
@@ -89,7 +89,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     static_dir = Path(__file__).resolve().parent / "static"
 
     if frontend_dir.is_dir():
-        application.mount("/", SPAStaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+        application.mount(
+            "/", SPAStaticFiles(directory=str(frontend_dir), html=True), name="frontend"
+        )
     else:
         if static_dir.is_dir():
             application.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")

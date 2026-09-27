@@ -73,3 +73,54 @@ class JobORM(Base):
         sa.Index("ix_jobs_discovered_at", "discovered_at"),
         sa.Index("ix_jobs_source_updated_at", "source_updated_at"),
     )
+
+
+class UserCredentialORM(Base):
+    """Encrypted credential vault entry for a specific user and service."""
+
+    __tablename__ = "user_credentials"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    user_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    service: Mapped[str] = mapped_column(String(64), nullable=False)
+    encrypted_payload: Mapped[bytes] = mapped_column(sa.LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        sa.UniqueConstraint("user_id", "service", name="uq_user_credentials_user_service"),
+        sa.Index("ix_user_credentials_user_service", "user_id", "service"),
+    )
+
+
+class UserORM(Base):
+    """User account model for multi-tenant authentication and profile ownership."""
+
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+

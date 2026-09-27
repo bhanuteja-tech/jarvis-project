@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import OrderedDict
 from typing import Annotated, Any
@@ -15,6 +16,7 @@ from app.candidate.analyzer import ResumeAnalyzer
 from app.config.settings import get_settings
 from app.jarvis.document_parser import DocumentParseError, extract, metadata
 from app.jarvis.orchestrator import JarvisOrchestrator
+from app.jarvis.redis_store import RedisSessionStore
 from app.jarvis.sessions import global_session_store
 from app.resume_intelligence.models import AiWriteRequest
 from app.resume_intelligence.writer import ResumeWriter
@@ -23,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["jarvis"])
 
-_session_store = global_session_store
+_session_store = RedisSessionStore()
 
 
 class _BoundedRunStore:
@@ -75,10 +77,13 @@ def _artifact_store() -> _BoundedRunStore:
     return _run_artifacts
 
 
-def reset_stores_for_tests() -> None:
-    global _runs, _run_artifacts
+def reset_stores_for_tests(disable_redis_socket: bool = True) -> None:
+    global _runs, _run_artifacts, _session_store
     _runs = None
     _run_artifacts = None
+    _session_store = RedisSessionStore()
+    if disable_redis_socket:
+        _session_store._client = None
 
 
 def _get_orchestrator() -> JarvisOrchestrator:
@@ -120,22 +125,133 @@ async def _handle_ws_connection(websocket: WebSocket, *, forced_domain: str | No
             ``None`` means legacy behaviour — the domain may be set via the
             ``mode`` query param or per-message ``mode`` field.
     """
+    from app.auth.dependencies import authenticate_websocket
     from app.jarvis.sessions import DomainViolation
 
     await websocket.accept()
 
+    app_settings = getattr(getattr(websocket, "app", None), "state", None)
+    current_settings = getattr(app_settings, "settings", None) if app_settings else None
+    try:
+        user_id = await authenticate_websocket(websocket, settings=current_settings)
+    except Exception:
+        return
+
     sid = websocket.query_params.get("session_id")
+    is_agent = (
+        websocket.query_params.get("client_type") == "agent"
+        or websocket.query_params.get("agent") == "true"
+    )
     if forced_domain in ("career", "computer"):
         # Domain-exclusive endpoint: lock the session to the forced domain.
-        session = _session_store.get_or_create(sid, domain=forced_domain, lock=True)  # type: ignore[call-arg]
+        session = _session_store.get_or_create(
+            sid, user_id=user_id, domain=forced_domain, lock=True
+        )
     else:
-        # Legacy shared endpoint: honour the mode query param (unlocked).
-        session = _session_store.get_or_create(sid)
+        # Legacy shared endpoint: honour mode / agent query params.
         ws_mode = websocket.query_params.get("mode")
+        domain_choice: Domain = "computer" if (is_agent or ws_mode == "computer") else "career"
+        session = _session_store.get_or_create(sid, user_id=user_id, domain=domain_choice)
         if ws_mode in ("career", "computer"):
             session.mode = ws_mode
 
     orchestrator = _get_orchestrator()
+
+    # Step 4: Register jarvis_agent connection if requested via query params
+    req_device_id = websocket.query_params.get("device_id")
+    ctx = getattr(session, "session_context", None)
+    if is_agent and ctx:
+        existing_ws = getattr(ctx, "agent_ws", None)
+        is_active = (
+            existing_ws is not None
+            and existing_ws is not websocket
+            and getattr(existing_ws, "client_state", None) == WebSocketState.CONNECTED
+        )
+        if is_active:
+            from datetime import UTC, datetime
+            from fastapi import status as http_status
+
+            logger.warning(
+                "Rejecting duplicate agent registration for session %s: active agent already connected",
+                session.session_id,
+            )
+            await websocket.send_json({
+                "type": "error",
+                "seq": 0,
+                "ts": datetime.now(UTC).isoformat(),
+                "run_id": None,
+                "data": {
+                    "code": "duplicate_agent_registration",
+                    "message": (
+                        f"Another agent is already actively connected for session "
+                        f"'{session.session_id}'. Takeover rejected."
+                    ),
+                },
+            })
+            await websocket.close(
+                code=http_status.WS_1008_POLICY_VIOLATION,
+                reason="Duplicate agent registration rejected",
+            )
+            return
+
+        # Device Identity Guard:
+        # If a disconnect grace period timer is active for this session, ONLY the exact
+        # same physical device (matching agent_device_id) may reconnect to claim the slot.
+        in_grace = (
+            getattr(ctx, "disconnect_timer", None) is not None
+            and not ctx.disconnect_timer.done()
+        )
+        bound_dev = getattr(ctx, "agent_device_id", None)
+        if in_grace and bound_dev and req_device_id != bound_dev:
+            from datetime import UTC, datetime
+            from fastapi import status as http_status
+
+            logger.warning(
+                "Rejecting agent reconnect for session %s: Device '%s' attempted to claim "
+                "reconnect slot reserved for device '%s'",
+                session.session_id,
+                req_device_id,
+                bound_dev,
+            )
+            await websocket.send_json({
+                "type": "error",
+                "seq": 0,
+                "ts": datetime.now(UTC).isoformat(),
+                "run_id": None,
+                "data": {
+                    "code": "duplicate_agent_registration",
+                    "message": (
+                        f"Device '{req_device_id}' cannot claim reconnect slot for session "
+                        f"'{session.session_id}'. That slot is reserved for device '{bound_dev}'."
+                    ),
+                },
+            })
+            await websocket.close(
+                code=http_status.WS_1008_POLICY_VIOLATION,
+                reason="Duplicate agent registration rejected (grace period device mismatch)",
+            )
+            return
+
+        # Cancel any active disconnect grace timer since same agent has reconnected
+        if getattr(ctx, "disconnect_timer", None):
+            if not ctx.disconnect_timer.done():
+                ctx.disconnect_timer.cancel()
+            ctx.disconnect_timer = None
+            logger.info(
+                "Cancelled disconnect grace timer on agent reconnection for session %s (device %s)",
+                session.session_id,
+                req_device_id,
+            )
+
+        ctx.agent_ws = websocket
+        if req_device_id:
+            ctx.agent_device_id = req_device_id
+        logger.info(
+            "Bound jarvis_agent WebSocket connection for session %s (user %s, device %s)",
+            session.session_id,
+            user_id,
+            ctx.agent_device_id,
+        )
 
     async def send(envelope: dict[str, Any]) -> None:
         try:
@@ -184,6 +300,128 @@ async def _handle_ws_connection(websocket: WebSocket, *, forced_domain: str | No
     try:
         while True:
             message = await websocket.receive_json()
+            msg_type = message.get("type")
+
+            # Step 4: Handle agent registration
+            if msg_type == "register_agent":
+                s_ctx = getattr(session, "session_context", None)
+                if s_ctx:
+                    msg_data = message.get("data") or message
+                    msg_dev_id = msg_data.get("device_id") or websocket.query_params.get("device_id")
+                    existing_ws = getattr(s_ctx, "agent_ws", None)
+                    is_active = (
+                        existing_ws is not None
+                        and existing_ws is not websocket
+                        and getattr(existing_ws, "client_state", None) == WebSocketState.CONNECTED
+                    )
+                    in_grace = (
+                        getattr(s_ctx, "disconnect_timer", None) is not None
+                        and not s_ctx.disconnect_timer.done()
+                    )
+                    bound_dev = getattr(s_ctx, "agent_device_id", None)
+                    if is_active or (in_grace and bound_dev and msg_dev_id != bound_dev):
+                        from datetime import UTC, datetime
+                        await send({
+                            "type": "error",
+                            "seq": 0,
+                            "ts": datetime.now(UTC).isoformat(),
+                            "run_id": None,
+                            "data": {
+                                "code": "duplicate_agent_registration",
+                                "message": (
+                                    f"Another agent or device ('{bound_dev}') is currently active "
+                                    f"or in grace period for session '{session.session_id}'. Takeover rejected."
+                                ),
+                            },
+                        })
+                        continue
+
+                    # Cancel grace timer if same agent reconnecting
+                    if getattr(s_ctx, "disconnect_timer", None):
+                        if not s_ctx.disconnect_timer.done():
+                            s_ctx.disconnect_timer.cancel()
+                        s_ctx.disconnect_timer = None
+
+                    s_ctx.agent_ws = websocket
+                    if msg_dev_id:
+                        s_ctx.agent_device_id = msg_dev_id
+                    logger.info(
+                        "Bound jarvis_agent for session %s (device %s)",
+                        session.session_id,
+                        s_ctx.agent_device_id,
+                    )
+                    from datetime import UTC, datetime
+                    await send({
+                        "type": "agent_registered",
+                        "seq": 0,
+                        "ts": datetime.now(UTC).isoformat(),
+                        "run_id": None,
+                        "data": {
+                            "status": "ok",
+                            "session_id": session.session_id,
+                            "device_id": s_ctx.agent_device_id,
+                        },
+                    })
+                continue
+
+            # Step 4: Handle inbound action_result
+            if msg_type == "action_result":
+                s_ctx = getattr(session, "session_context", None)
+                from datetime import UTC, datetime
+                # Transport Invariant: Connection must be the bound agent for this session
+                if not s_ctx or s_ctx.agent_ws is not websocket:
+                    logger.warning(
+                        "Security violation: action_result received on non-agent connection for session %s",
+                        session.session_id,
+                    )
+                    await send({
+                        "type": "error",
+                        "seq": 0,
+                        "ts": datetime.now(UTC).isoformat(),
+                        "run_id": None,
+                        "data": {
+                            "code": "unauthorized_agent_connection",
+                            "message": "action_result is only accepted from the session's bound agent connection.",
+                        },
+                    })
+                    continue
+
+                action_id = message.get("action_id") or (message.get("data") or {}).get("action_id")
+                if not action_id or action_id not in s_ctx.pending_actions:
+                    logger.warning(
+                        "Protocol violation: action_id '%s' not found in session '%s' pending actions",
+                        action_id,
+                        session.session_id,
+                    )
+                    await send({
+                        "type": "error",
+                        "seq": 0,
+                        "ts": datetime.now(UTC).isoformat(),
+                        "run_id": None,
+                        "data": {
+                            "code": "invalid_action_id",
+                            "message": f"action_id '{action_id}' is unrecognized or does not belong to this session.",
+                        },
+                    })
+                    continue
+
+                # Resolve future with ActionResultPayload
+                data = message.get("data") or message
+                from app.jarvis.events import ActionResultPayload
+                payload = ActionResultPayload(
+                    action_id=action_id,
+                    step_id=data.get("step_id", ""),
+                    success=data.get("success", False),
+                    message=data.get("message", ""),
+                    cancelled=data.get("cancelled", False),
+                    details=data.get("details", {}),
+                    observation=data.get("observation", {}),
+                )
+                fut = s_ctx.pending_actions[action_id]
+                if not fut.done():
+                    fut.set_result(payload)
+                continue
+
             try:
                 await orchestrator.handle_message(session, message, send=send)
             except DomainViolation as exc:
@@ -216,6 +454,74 @@ async def _handle_ws_connection(websocket: WebSocket, *, forced_domain: str | No
             await websocket.close(code=1011)
         except Exception:
             pass
+    finally:
+        f_ctx = getattr(session, "session_context", None)
+        if f_ctx and getattr(f_ctx, "agent_ws", None) is websocket:
+            f_ctx.agent_ws = None
+            logger.info("Deregistered jarvis_agent connection for session %s", session.session_id)
+
+            # Cancel any previously running timer
+            if getattr(f_ctx, "disconnect_timer", None) and not f_ctx.disconnect_timer.done():
+                f_ctx.disconnect_timer.cancel()
+                f_ctx.disconnect_timer = None
+
+            pending_items = list(f_ctx.pending_actions.items())
+            if pending_items:
+                app_settings = getattr(getattr(websocket, "app", None), "state", None)
+                curr_settings = getattr(app_settings, "settings", None) if app_settings else None
+                grace_seconds = float(
+                    getattr(curr_settings, "jarvis_disconnect_grace_period_seconds", 15.0)
+                )
+                logger.info(
+                    "Starting %0.1fs disconnect grace timer for session %s (%d in-flight actions)",
+                    grace_seconds,
+                    session.session_id,
+                    len(pending_items),
+                )
+
+                async def _grace_period_cancellation(
+                    ctx_ref: Any,
+                    sess_id: str,
+                    actions: list[tuple[str, asyncio.Future[Any]]],
+                    wait_time: float,
+                ) -> None:
+                    try:
+                        await asyncio.sleep(wait_time)
+                        if getattr(ctx_ref, "agent_ws", None) is None:
+                            logger.warning(
+                                "Disconnect grace period (%0.1fs) expired for session %s. Failing %d in-flight action(s).",
+                                wait_time,
+                                sess_id,
+                                len(actions),
+                            )
+                            from app.desktop.dispatcher import ActionCancelledError
+
+                            for aid, fut in actions:
+                                if not fut.done():
+                                    fut.set_exception(
+                                        ActionCancelledError(
+                                            f"Agent disconnected and did not reconnect within "
+                                            f"{wait_time:.1f}s grace period."
+                                        )
+                                    )
+                                    ctx_ref.pending_actions.pop(aid, None)
+                            ctx_ref.agent_device_id = None
+                    except asyncio.CancelledError:
+                        logger.info(
+                            "Disconnect grace period timer cancelled due to agent reconnection for session %s",
+                            sess_id,
+                        )
+                    finally:
+                        if getattr(ctx_ref, "disconnect_timer", None) is asyncio.current_task():
+                            ctx_ref.disconnect_timer = None
+
+                f_ctx.disconnect_timer = asyncio.create_task(
+                    _grace_period_cancellation(
+                        f_ctx, session.session_id, pending_items, grace_seconds
+                    )
+                )
+            else:
+                f_ctx.agent_device_id = None
 
 
 @router.websocket("/ws/computer")

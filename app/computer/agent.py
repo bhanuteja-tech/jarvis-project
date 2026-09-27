@@ -44,7 +44,6 @@ from app.llm.gemini_computer_use import (
 from app.llm.main_router import (
     MainLLMRouter,
     TaskContext,
-    default_main_llm_router,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,9 +107,11 @@ class LLMComputerAgent:
         llm_client: AssistantClientProtocol | None = None,
         firewall: SemanticFirewall | None = None,
         typed_context: TypedContext | None = None,
+        circuit_breaker: ActionCircuitBreaker | None = None,
         decision_engine: DecisionEngine | None = None,
         llm_router: MainLLMRouter | None = None,
         computer_use_provider: ComputerUseProvider | None = None,
+        task_manager: Any | None = None,
     ) -> None:
         self.state = state or default_computer_state
         self._custom_harness = harness
@@ -119,8 +120,15 @@ class LLMComputerAgent:
         self.llm_client = llm_client
         self.firewall = firewall or SemanticFirewall(domain="computer")
         self.typed_context = typed_context or TypedContext()
+        self.circuit_breaker = circuit_breaker or ActionCircuitBreaker()
         self.decision_engine = decision_engine or get_decision_engine()
-        self.llm_router = llm_router or default_main_llm_router
+        self.llm_router = llm_router or MainLLMRouter()
+        if task_manager is not None:
+            self.task_manager = task_manager
+        else:
+            from app.agent.task_manager import TaskManager
+
+            self.task_manager = TaskManager()
 
         if computer_use_provider is not None:
             self.computer_use_provider: ComputerUseProvider | None = computer_use_provider
@@ -183,8 +191,11 @@ class LLMComputerAgent:
                 self.circuit_breaker = session.circuit_breaker
             else:
                 session.circuit_breaker = self.circuit_breaker
-        else:
+        elif not hasattr(self, "circuit_breaker") or self.circuit_breaker is None:
             self.circuit_breaker = ActionCircuitBreaker()
+
+        # Reset circuit breaker for this specific task execution (authoritative task timer)
+        self.circuit_breaker.reset_for_task(self.circuit_breaker.task_timeout_seconds)
 
         trace = global_latency_tracker.start_trace(task_id=task_id, user_request=user_request)
 
@@ -206,9 +217,9 @@ class LLMComputerAgent:
 
         task_gen = self.current_generation
 
-        from app.agent.task_manager import TaskLifecycle, default_task_manager
+        from app.agent.task_manager import TaskLifecycle
 
-        current_task_obj = default_task_manager.create_task(
+        current_task_obj = self.task_manager.create_task(
             intent=user_request,
             goal=user_request,
             generation=task_gen,
@@ -490,7 +501,58 @@ class LLMComputerAgent:
             )
 
             trace.mark("tool_start")
-            harness_result = await self._execute_tool(tool_name, validation.arguments)
+            tool_start_ts = time.perf_counter()
+            url_before = (
+                self.state.current_url
+                or (self.observer.observe().get("browser") or {}).get("url")
+                or ""
+            )
+
+            # Bounded tool execution (up to 15s) to guarantee no indefinite blockage
+            try:
+                harness_result = await asyncio.wait_for(
+                    self._execute_tool(tool_name, validation.arguments),
+                    timeout=15.0,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "Tool %s timed out after 15.0s; checking live observation.", tool_name
+                )
+                # Check live state: did the action actually succeed in the real world?
+                obs_check = self.observer.observe()
+                target_u = validation.arguments.get("url") or ""
+                active_u = (
+                    obs_check.get("current_url")
+                    or (obs_check.get("browser") or {}).get("url")
+                    or ""
+                ).lower()
+                win_t = (obs_check.get("active_window_title") or "").lower()
+
+                if target_u and (
+                    target_u.lower().rstrip("/") in active_u
+                    or (
+                        "youtube" in target_u.lower()
+                        and ("youtube.com" in active_u or "youtube" in win_t)
+                    )
+                ):
+                    harness_result = {
+                        "success": True,
+                        "url": target_u,
+                        "action": tool_name,
+                        "message": (
+                            f"Operation timed out, but verified {target_u} reached via observation."
+                        ),
+                        "recovered_from_timeout": True,
+                    }
+                else:
+                    harness_result = {
+                        "success": False,
+                        "action": tool_name,
+                        "message": f"Action '{tool_name}' timed out after 15s.",
+                        "error": "tool_timeout",
+                    }
+            tool_end_ts = time.perf_counter()
+            tool_dur = tool_end_ts - tool_start_ts
             trace.mark("tool_end")
 
             # Brief pause for OS/DOM stabilization
@@ -525,6 +587,39 @@ class LLMComputerAgent:
                 observation=observation,
                 verified=verification.verified,
                 environment_identity=self.state.active_application or "",
+            )
+
+            # Structured runtime debug telemetry (Requirement 15)
+            url_after = (
+                observation.get("current_url")
+                or (observation.get("browser") or {}).get("url")
+                or self.state.current_url
+                or ""
+            )
+            v_status = "SUCCESS" if verification.verified else "FAILED"
+            retry_count = self.circuit_breaker.action_retries.get(tool_name, 0)
+            res_label = (
+                "already_at_target"
+                if harness_result.get("already_at_target")
+                else (
+                    "timeout_recovered"
+                    if harness_result.get("recovered_from_timeout")
+                    or harness_result.get("navigation_recovered_from_timeout")
+                    else ("success" if harness_result.get("success") else "failed")
+                )
+            )
+            logger.info(
+                "[BROWSER_TELEMETRY] tool=%s req=%s before=%s dur=%.2fs res=%s "
+                "after=%s ver=%s retries=%d gen=%d",
+                tool_name,
+                validation.arguments.get("url") or validation.arguments.get("query") or "",
+                url_before,
+                tool_dur,
+                res_label,
+                url_after,
+                v_status,
+                retry_count,
+                task_gen,
             )
 
             # Record action in audit log
@@ -752,6 +847,54 @@ class LLMComputerAgent:
 
         # 3. Web Services & Direct navigation
         if "youtube" in g:
+            # Multi-step compound goal: "open youtube and search (for) <query>"
+            m_yt_compound = re.search(
+                r"(?:open|go\s+to|launch)\s+youtube\s+(?:and|,|then)\s+search\s+(?:for\s+)?(.+)",
+                clean_goal,
+                re.IGNORECASE,
+            )
+            if m_yt_compound:
+                query = m_yt_compound.group(1).strip().rstrip(".!?")
+                search_done = any(
+                    a.tool == "browser_search" and a.verified
+                    for a in (turn_actions or [])
+                )
+                if search_done:
+                    return {
+                        "decision": "complete",
+                        "thought": f"Searched YouTube for '{query}'.",
+                        "response": f"Searched YouTube for '{query}'.",
+                    }
+
+                nav_done = any(
+                    a.tool == "browser_navigate" and a.verified
+                    for a in (turn_actions or [])
+                )
+                curr_u = (self.state.current_url or "").lower()
+                active_app = (self.state.active_application or "").lower()
+                active_t = (self.state.active_window_title or "").lower()
+                is_yt_open = (
+                    nav_done
+                    or "youtube.com" in curr_u
+                    or "youtube" in active_app
+                    or "youtube" in active_t
+                )
+
+                if not is_yt_open:
+                    return {
+                        "decision": "tool_call",
+                        "thought": "Opening YouTube.",
+                        "tool": "browser_navigate",
+                        "arguments": {"url": "https://www.youtube.com"},
+                    }
+                else:
+                    return {
+                        "decision": "tool_call",
+                        "thought": f"Searching YouTube for '{query}'.",
+                        "tool": "browser_search",
+                        "arguments": {"query": query, "site": "youtube"},
+                    }
+
             m_yt_search = re.search(r"search\s+(.+?)\s+on\s+youtube", clean_goal, re.IGNORECASE)
             if m_yt_search:
                 query = m_yt_search.group(1).strip()
@@ -801,14 +944,21 @@ class LLMComputerAgent:
             }
 
         if g.startswith(("search for ", "search ")):
-            if "youtube" not in g:
-                query = re.sub(r"^search\s+(?:for\s+)?", "", clean_goal).strip()
-                return {
-                    "decision": "tool_call",
-                    "thought": f"Searching for '{query}'.",
-                    "tool": "browser_search",
-                    "arguments": {"query": query, "site": "google"},
-                }
+            query = re.sub(r"^search\s+(?:for\s+)?", "", clean_goal).strip()
+            curr_u = (self.state.current_url or "").lower()
+            active_app = (self.state.active_application or "").lower()
+            active_t = (self.state.active_window_title or "").lower()
+            site = "google"
+            if "youtube.com" in curr_u or "youtube" in active_app or "youtube" in active_t:
+                site = "youtube"
+            elif "github.com" in curr_u or "github" in active_app or "github" in active_t:
+                site = "github"
+            return {
+                "decision": "tool_call",
+                "thought": f"Searching {site.title()} for '{query}'.",
+                "tool": "browser_search",
+                "arguments": {"query": query, "site": site},
+            }
 
         # 4. Browser Navigation History & Tabs
         if g in {"go back", "back", "navigate back", "previous page"}:
@@ -1418,13 +1568,22 @@ class LLMComputerAgent:
 
             # 5. Ground search when user says "search for ..." or "search ..."
             if clean_g.startswith(("search for ", "search ")):
-                if "youtube" not in clean_g:
-                    q = re.sub(r"^search\s+(?:for\s+)?", "", clean_g).strip()
-                    dec["decision"] = "tool_call"
-                    dec["tool"] = "browser_search"
-                    dec["arguments"] = {"query": q, "site": "google"}
-                    dec["thought"] = f"Searching for '{q}'."
-                    return dec
+                q = re.sub(r"^search\s+(?:for\s+)?", "", clean_g).strip()
+                curr_u = (self.state.current_url or "").lower()
+                active_app = (self.state.active_application or "").lower()
+                active_t = (self.state.active_window_title or "").lower()
+                site = "google"
+                is_yt = any("youtube" in k for k in (curr_u, active_app, active_t, clean_g))
+                is_gh = any("github" in k for k in (curr_u, active_app, active_t, clean_g))
+                if is_yt:
+                    site = "youtube"
+                elif is_gh:
+                    site = "github"
+                dec["decision"] = "tool_call"
+                dec["tool"] = "browser_search"
+                dec["arguments"] = {"query": q, "site": site}
+                dec["thought"] = f"Searching {site.title()} for '{q}'."
+                return dec
 
             # 6. Service / account target grounding (e.g. "open lohith122 github account")
             from app.desktop.web_services import parse_service_account_query
@@ -1668,6 +1827,9 @@ class LLMComputerAgent:
                 "response": f"Opened file {fname}.",
             }
         if last_act.tool == "browser_navigate":
+            # If the user's goal was compound (navigate + search), navigation alone is not complete!
+            if any(w in g for w in ("search", "find", "look up")):
+                return None
             url = last_act.arguments.get("url", "")
             service = last_act.arguments.get("service")
             if "github.com" in url or (service and "github" in service.lower()):
@@ -2259,14 +2421,52 @@ class LLMComputerAgent:
             url = arguments.get("url") or ""
             browser = arguments.get("browser")
             service = arguments.get("service")
+
+            # If service is specified (e.g. github, linkedin), dispatch to open_service
+            # so personalized credentials / profiles in the vault are checked.
             if service and hasattr(self.harness, "execute_command"):
                 res = self.harness.execute_command(
                     "open_service", {"service": service, "url": url}, session=self._current_session
                 )
-            elif hasattr(self.harness, "browser_navigate"):
-                res = self.harness.browser_navigate(url, browser=browser)
             else:
-                res = {"success": True, "action": "browser_navigate", "url": url}
+                # 1. Idempotency check: if current state is already at requested target
+                curr_url = (self.state.current_url or "").lower().rstrip("/")
+                tgt_url = url.lower().rstrip("/")
+                active_title = (self.state.active_window_title or "").lower()
+                active_app = (self.state.active_application or "").lower()
+
+                is_target_yt_home = tgt_url in (
+                    "https://www.youtube.com",
+                    "https://youtube.com",
+                    "http://www.youtube.com",
+                    "http://youtube.com",
+                )
+                is_already = False
+                if curr_url and (curr_url == tgt_url or curr_url == f"{tgt_url}/"):
+                    is_already = True
+                elif is_target_yt_home and (
+                    "youtube.com" in curr_url
+                    or "youtube" in active_title
+                    or "youtube" in active_app
+                ):
+                    is_already = True
+
+                if is_already:
+                    if self._current_session is not None:
+                        self._current_session.active_browser = True
+                    return {
+                        "success": True,
+                        "already_at_target": True,
+                        "action": "browser_navigate",
+                        "url": url or self.state.current_url,
+                        "message": f"Already at {url or self.state.current_url}.",
+                        "details": {"url": url, "already_at_target": True},
+                    }
+
+                if hasattr(self.harness, "browser_navigate"):
+                    res = self.harness.browser_navigate(url, browser=browser)
+                else:
+                    res = {"success": True, "action": "browser_navigate", "url": url}
             res_dict = (
                 res.to_dict()
                 if hasattr(res, "to_dict")
@@ -2274,6 +2474,55 @@ class LLMComputerAgent:
                     dict(res) if isinstance(res, dict) else {"success": True, "message": str(res)}
                 )
             )
+
+            # CRITICAL RULE: TIMEOUT DOES NOT MEAN ACTION FAILED
+            # If the operation timed out or failed, observe live state.
+            # If the target URL or domain is now reached, treat as success!
+            if not res_dict.get("success"):
+                obs = self.observer.observe()
+                if hasattr(obs, "to_dict"):
+                    obs_dict = obs.to_dict()
+                elif isinstance(obs, dict):
+                    obs_dict = obs
+                else:
+                    obs_dict = {}
+                active_u = (
+                    obs_dict.get("current_url")
+                    or (obs_dict.get("browser") or {}).get("url")
+                    or self.state.current_url
+                    or ""
+                ).lower()
+                win_t = (
+                    obs_dict.get("active_window_title") or self.state.active_window_title or ""
+                ).lower()
+                win_app = (
+                    obs_dict.get("active_application") or self.state.active_application or ""
+                ).lower()
+                reached = False
+                if url and (url.lower().rstrip("/") in active_u or active_u in url.lower()):
+                    reached = True
+                elif "youtube" in url.lower() and (
+                    "youtube.com" in active_u or "youtube" in win_t or "youtube" in win_app
+                ):
+                    reached = True
+                elif service and (
+                    service.lower() in active_u
+                    or service.lower() in win_t
+                    or service.lower() in win_app
+                ):
+                    reached = True
+
+                if reached:
+                    logger.info(
+                        "Navigation reported failure/timeout, but target %s reached.",
+                        url,
+                    )
+                    res_dict["success"] = True
+                    res_dict["url"] = url
+                    res_dict["message"] = f"Navigated to {url} (verified via observation)."
+                    res_dict["recovered_from_timeout"] = True
+                    res_dict["navigation_recovered_from_timeout"] = True
+
             if self._current_session is not None:
                 self._current_session.active_browser = True
                 if res_dict.get("needs_user_input") and res_dict.get("pending_prompt"):
@@ -2549,18 +2798,24 @@ class LLMComputerAgent:
                     generation=generation,
                 )
 
+            # 0. If already_at_target reported
+            if harness_result.get("already_at_target"):
+                return VerificationResult(
+                    success=True,
+                    confidence=1.0,
+                    reason=f"Already at target: {target_str or active_url}.",
+                    details=harness_result,
+                    evidence={"url": active_url, "already_at_target": True},
+                )
+
             # 2. YouTube verification
             if "youtube.com" in target_str or "youtube" in user_goal.lower():
-                if "search" in user_goal.lower():
-                    m_q = re.search(r"search\s+(.+?)\s+on\s+youtube", user_goal, re.IGNORECASE)
-                    q = m_q.group(1).strip() if m_q else "YouTube"
-                    return self.verifier.verify_youtube_search(
-                        query=q,
-                        observation=observation,
-                        task_id=task_id,
-                        generation=generation,
-                    )
-                if "youtube.com" in active_url:
+                # For browser_navigate, we verify navigation to YouTube!
+                if (
+                    "youtube.com" in active_url.lower()
+                    or "youtube" in page_title.lower()
+                    or "youtube" in (observation.get("active_application") or "").lower()
+                ):
                     return VerificationResult(
                         success=True,
                         confidence=1.0,
@@ -2570,7 +2825,9 @@ class LLMComputerAgent:
                     )
 
             # 3. Direct URL target match
-            if target_str.startswith("http") and target_str in active_url:
+            if target_str.startswith("http") and (
+                target_str.lower() in active_url.lower() or active_url.lower() in target_str.lower()
+            ):
                 return VerificationResult(
                     success=True,
                     confidence=1.0,
@@ -2601,6 +2858,17 @@ class LLMComputerAgent:
                     details=harness_result,
                     evidence=harness_result,
                 )
+
+            return VerificationResult(
+                success=False,
+                confidence=0.0,
+                reason=(
+                    f"Navigation failed: target '{target_str}' not reached "
+                    f"(active URL: '{active_url}')."
+                ),
+                details=harness_result,
+                evidence={"url": active_url},
+            )
 
         if tool_name == "browser_search":
             query = arguments.get("query", "")

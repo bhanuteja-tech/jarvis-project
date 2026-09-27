@@ -12,9 +12,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.desktop.web_services import find_service
-from app.routing.app_resolver import ApplicationResolver, default_app_resolver
+from app.routing.app_resolver import ApplicationResolver
 from app.routing.normalizer import normalize_speech
-from app.routing.planner import ExecutionPlan, PlannedStep, default_planner
+from app.routing.planner import ExecutionPlan, ExecutionPlanner, PlannedStep
 from app.routing.taxonomy import Intent
 
 # Explicit career cue words that MUST be present to route to career workflows
@@ -94,8 +94,13 @@ class RouteResult:
 class IntentRouter:
     """Authoritative deterministic priority router."""
 
-    def __init__(self, app_resolver: ApplicationResolver | None = None) -> None:
-        self.app_resolver = app_resolver or default_app_resolver
+    def __init__(
+        self,
+        app_resolver: ApplicationResolver | None = None,
+        planner: ExecutionPlanner | None = None,
+    ) -> None:
+        self.app_resolver = app_resolver or ApplicationResolver()
+        self.planner = planner or ExecutionPlanner()
 
     def route(self, text: str, context: Any | None = None) -> RouteResult:
         """Route a user utterance with full normalization, planning, and disambiguation."""
@@ -167,7 +172,7 @@ class IntentRouter:
             )
 
         # 3. Compound Action Planning (e.g. "open whatsapp and send a message to lohit")
-        sub_steps = default_planner.plan(cleaned)
+        sub_steps = self.planner.plan(cleaned)
         if len(sub_steps) > 1:
             planned_steps: list[PlannedStep] = []
             for idx, step_text in enumerate(sub_steps, start=1):

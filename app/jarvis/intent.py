@@ -138,7 +138,7 @@ def _extract_query_and_locations(text: str) -> tuple[str, list[str]]:
     return final_query, locations
 
 
-def parse_intent(text: str) -> Plan:
+def parse_intent(text: str, *, router: Any | None = None) -> Plan:
     """Deterministic grammar. Never raises."""
     cleaned = (text or "").strip()
     lowered = cleaned.lower()
@@ -172,10 +172,13 @@ def parse_intent(text: str) -> Plan:
         return Plan(action="help", from_free_text=False)
 
     # ---- Authoritative Centralized Priority Router -------------------------
-    from app.routing.router import default_router
+    if router is None:
+        from app.routing.router import IntentRouter
+
+        router = IntentRouter()
     from app.routing.taxonomy import Intent, is_browser_control, is_computer_control
 
-    route_res = default_router.route(cleaned)
+    route_res = router.route(cleaned)
 
     # 1. Session control / Interrupt
     if route_res.intent == Intent.VOICE_SESSION_STOP:

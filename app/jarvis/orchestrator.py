@@ -739,12 +739,17 @@ class JarvisOrchestrator:
             session.mode = msg_mode
         effective_mode = getattr(session, "mode", "career")
 
+        self._current_session = session
         if message_type in ("cancel", "voice_barge_in"):
             logger.info("RECEIVED CANCELLATION / BARGE-IN: %s", message_type)
             barge_gen = message.get("generation")
             if barge_gen is not None:
-                from app.agent.task_manager import default_task_manager
-                default_task_manager.invalidate_generation(barge_gen)
+                task_mgr = getattr(session, "task_manager", None)
+                if task_mgr is None:
+                    from app.agent.task_manager import TaskManager
+
+                    task_mgr = TaskManager()
+                task_mgr.invalidate_generation(barge_gen)
             await self._cancel(emitter)
             return
 
@@ -906,7 +911,7 @@ class JarvisOrchestrator:
 
             # ===================================================================
             # AUTHORITATIVE COMPUTER CONTROL PATH (/app/computer)
-            # User -> ComputerSession -> TaskManager -> Fast Gate -> ComputerAgent -> Tools -> Observe -> Verify
+            # User -> ComputerSession -> TaskManager -> Fast Gate -> ComputerAgent -> Tools
             # ===================================================================
             if effective_mode == "computer":
                 clean_text = text.strip().lower()
@@ -923,7 +928,9 @@ class JarvisOrchestrator:
                         code="interrupted",
                         message="Action stopped.",
                     )
-                    await self._speak(emitter, None, "Stopped.", is_voice=is_voice, generation=generation)
+                    await self._speak(
+                        emitter, None, "Stopped.", is_voice=is_voice, generation=generation
+                    )
                     return
 
                 # 2. Career Domain Barrier Check (Hard isolation)
@@ -934,8 +941,12 @@ class JarvisOrchestrator:
                 )
                 if any(k in clean_punct for k in _career_keywords):
                     self._run_counter += 1
-                    run_id = f"run_{session.session_id[:8]}_{self._run_counter:04d}_{time.time_ns()}"
-                    await emitter.emit(ev.EventType.AGENT_STARTED, run_id=run_id, action="mode_boundary")
+                    run_id = (
+                        f"run_{session.session_id[:8]}_{self._run_counter:04d}_{time.time_ns()}"
+                    )
+                    await emitter.emit(
+                        ev.EventType.AGENT_STARTED, run_id=run_id, action="mode_boundary"
+                    )
                     await self._speak(
                         emitter,
                         run_id,
@@ -953,7 +964,9 @@ class JarvisOrchestrator:
                 # 3. Help Check
                 if clean_punct in ("help", "what can you do", "commands"):
                     self._run_counter += 1
-                    run_id = f"run_{session.session_id[:8]}_{self._run_counter:04d}_{time.time_ns()}"
+                    run_id = (
+                        f"run_{session.session_id[:8]}_{self._run_counter:04d}_{time.time_ns()}"
+                    )
                     await emitter.emit(ev.EventType.AGENT_STARTED, run_id=run_id, action="help")
                     help_text = (
                         "Computer Control Commands:\n"
@@ -963,7 +976,9 @@ class JarvisOrchestrator:
                         "• Files: 'Open Desktop', 'Open Downloads', 'Count files on desktop'\n"
                         "• Voice: 'Stop', 'Bye Jarvis' to end session."
                     )
-                    await self._speak(emitter, run_id, help_text, is_voice=is_voice, generation=generation)
+                    await self._speak(
+                        emitter, run_id, help_text, is_voice=is_voice, generation=generation
+                    )
                     await emitter.emit(ev.EventType.AGENT_COMPLETED, run_id=run_id)
                     return
 
@@ -1020,19 +1035,27 @@ class JarvisOrchestrator:
             # ===================================================================
             # CAREER INTELLIGENCE PATH (/app/career)
             # ===================================================================
-            from app.agent.task_manager import default_task_manager
-            from app.routing.router import default_router
+            router = getattr(session, "router", None)
+            if router is None:
+                from app.routing.router import IntentRouter
+
+                router = IntentRouter()
 
             b_ctx = getattr(session, "browser_context", None)
-            route_check = default_router.route(text, context=b_ctx)
+            route_check = router.route(text, context=b_ctx)
             if route_check.is_correction:
                 logger.info("CORRECTION DETECTED: %s", text)
-                default_task_manager.invalidate_generation(default_task_manager.current_generation)
-                default_task_manager.next_generation()
+                task_mgr = getattr(session, "task_manager", None)
+                if task_mgr is None:
+                    from app.agent.task_manager import TaskManager
+
+                    task_mgr = TaskManager()
+                task_mgr.invalidate_generation(task_mgr.current_generation)
+                task_mgr.next_generation()
                 had_active = self._current_task is not None and not self._current_task.done()
                 await self._cancel(emitter, quiet=not had_active)
 
-            plan = parse_intent(text)
+            plan = parse_intent(text, router=router)
 
             # ---- Domain enforcement layer (orchestrator) -----------------
             _career_actions_with_soft_block = {
@@ -1073,7 +1096,12 @@ class JarvisOrchestrator:
             if plan.action == "interrupt":
                 had_active = self._current_task is not None and not self._current_task.done()
                 await self._cancel(emitter, quiet=not had_active)
-                default_task_manager.invalidate_generation(default_task_manager.current_generation)
+                task_mgr = getattr(session, "task_manager", None)
+                if task_mgr is None:
+                    from app.agent.task_manager import TaskManager
+
+                    task_mgr = TaskManager()
+                task_mgr.invalidate_generation(task_mgr.current_generation)
                 await emitter.emit(
                     ev.EventType.RUN_CANCELLED,
                     code="interrupted",
@@ -2072,9 +2100,15 @@ class JarvisOrchestrator:
         is_acknowledgment: bool = False,
         is_termination: bool = False,
     ) -> None:
-        from app.agent.task_manager import default_task_manager
+        task_mgr = getattr(self, "_current_session", None)
+        if task_mgr is not None:
+            task_mgr = getattr(task_mgr, "task_manager", None)
+        if task_mgr is None:
+            from app.agent.task_manager import TaskManager
 
-        if generation is not None and not default_task_manager.is_generation_valid(generation):
+            task_mgr = TaskManager()
+
+        if generation is not None and not task_mgr.is_generation_valid(generation):
             logger.info("Dropping speech for invalidated generation %s: %s", generation, text[:30])
             return
 

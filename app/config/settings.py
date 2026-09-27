@@ -218,6 +218,31 @@ class Settings(BaseSettings):
     ollama_model: str = ""
     ollama_auth_token: SecretStr = SecretStr("")
 
+    #: Fernet secret key for encrypted credential vault
+    #: (32 url-safe base64 bytes or arbitrary secret phrase)
+    jarvis_vault_secret_key: SecretStr = SecretStr("")
+
+    # Auth & Multi-tenancy (Step 3)
+    jwt_secret_key: SecretStr = SecretStr("change-me-in-production-jwt-secret-key-32b")
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 60
+    jwt_refresh_token_expire_days: int = 7
+    #: When false (default), unauthenticated WebSocket connections without valid JWT are rejected.
+    #: Set true strictly for local dev/testing where authentication is intentionally bypassed.
+    jarvis_allow_unauthenticated: bool = False
+
+    # Redis Session Store (Step 3)
+    redis_url: str = "redis://localhost:6379/0"
+    redis_session_ttl_seconds: int = 86400
+
+    # Remote Agent & Action Protocol (Step 4)
+    #: When false (default), sessions without an active jarvis_agent fail explicitly.
+    #: Set true strictly for single-machine local development where server and desktop run together.
+    jarvis_allow_local_execution_fallback: bool = False
+    jarvis_remote_action_timeout_seconds: float = 30.0
+    jarvis_confirmation_timeout_seconds: float = 120.0
+    jarvis_disconnect_grace_period_seconds: float = 15.0
+
     log_level: str = "INFO"
 
     @field_validator("log_level")

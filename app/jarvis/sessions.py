@@ -104,6 +104,7 @@ class DomainViolation(Exception):
 class Session:
     session_id: str
     created_at: str
+    user_id: str = "default"
     #: Immutable domain lock — set once at connection time by the WS endpoint.
     #: This is the enforcement boundary: a computer session can NEVER call
     #: career tools and vice versa.
@@ -174,9 +175,11 @@ class ComputerSession(Session):
     """Session locked to the Computer Control domain.
 
     Uses ComputerAgent and ComputerToolRegistry exclusively with strict per-session state isolation.
+    Delegates state, controllers, tasks, circuit breakers, and vaults to SessionContext.
     """
 
     domain: Domain = "computer"
+    _session_context: Any = field(default=None, repr=False)
     _computer_state: Any = field(default=None, repr=False)
     _task_manager: Any = field(default=None, repr=False)
     _circuit_breaker: Any = field(default=None, repr=False)
@@ -184,53 +187,73 @@ class ComputerSession(Session):
     _browser_sess: Any = field(default=None, repr=False)
 
     @property
+    def session_context(self) -> Any:
+        if self._session_context is None:
+            from app.computer.session_context import create_session_context
+
+            self._session_context = create_session_context(
+                user_id=self.user_id,
+                session_id=self.session_id,
+            )
+            if self._computer_state is not None:
+                self._session_context.computer_state = self._computer_state
+            if self._typed_ctx is not None:
+                self._session_context.typed_context = self._typed_ctx
+            if self._circuit_breaker is not None:
+                self._session_context.circuit_breaker = self._circuit_breaker
+            if self._task_manager is not None:
+                self._session_context.task_manager = self._task_manager
+        return self._session_context
+
+    @session_context.setter
+    def session_context(self, val: Any) -> None:
+        self._session_context = val
+
+    @property
     def computer_state(self) -> Any:
-        if self._computer_state is None:
-            from app.desktop.state import ComputerState
-            self._computer_state = ComputerState()
-        return self._computer_state
+        return self.session_context.computer_state
 
     @computer_state.setter
     def computer_state(self, val: Any) -> None:
-        self._computer_state = val
+        self.session_context.computer_state = val
 
     @property
     def typed_context(self) -> Any:
-        if self._typed_ctx is None:
-            from app.computer.context import TypedContext
-            self._typed_ctx = TypedContext()
-        return self._typed_ctx
+        return self.session_context.typed_context
 
     @typed_context.setter
     def typed_context(self, val: Any) -> None:
-        self._typed_ctx = val
+        self.session_context.typed_context = val
 
     @property
     def circuit_breaker(self) -> Any:
-        if self._circuit_breaker is None:
-            from app.computer.circuit_breaker import ActionCircuitBreaker
-            self._circuit_breaker = ActionCircuitBreaker()
-        return self._circuit_breaker
+        return self.session_context.circuit_breaker
 
     @circuit_breaker.setter
     def circuit_breaker(self, val: Any) -> None:
-        self._circuit_breaker = val
+        self.session_context.circuit_breaker = val
 
     @property
     def task_manager(self) -> Any:
-        if self._task_manager is None:
-            from app.agent.task_manager import TaskManager
-            self._task_manager = TaskManager()
-        return self._task_manager
+        return self.session_context.task_manager
 
     @task_manager.setter
     def task_manager(self, val: Any) -> None:
-        self._task_manager = val
+        self.session_context.task_manager = val
+
+    @property
+    def vault(self) -> Any:
+        return self.session_context.vault
+
+    @vault.setter
+    def vault(self, val: Any) -> None:
+        self.session_context.vault = val
 
     @property
     def browser_session(self) -> Any:
         if self._browser_sess is None:
             from app.desktop.browser_session import BrowserSession
+
             self._browser_sess = BrowserSession()
         return self._browser_sess
 
@@ -240,39 +263,89 @@ class ComputerSession(Session):
 
     @property
     def tool_registry(self) -> Any:
-        from app.computer.tools import default_computer_tool_registry
-        return default_computer_tool_registry
+        return self.session_context.tool_registry
 
     @property
     def agent(self) -> Any:
-        if self.computer_agent is not None:
-            return self.computer_agent
-        from app.computer.agent import ComputerAgent
-        self.computer_agent = ComputerAgent(
-            state=self.computer_state,
-            typed_context=self.typed_context,
-        )
-        return self.computer_agent
+        return self.session_context.agent
+
+    @property
+    def router(self) -> Any:
+        return self.session_context.router
+
+    @property
+    def planner(self) -> Any:
+        return self.session_context.planner
+
+    @property
+    def semantic_planner(self) -> Any:
+        return self.session_context.semantic_planner
+
+    @property
+    def llm_router(self) -> Any:
+        return self.session_context.llm_router
 
 
 @dataclass
 class CareerSession(Session):
     """Session locked to the Career Intelligence domain.
 
-    Uses CareerAgent and CareerToolRegistry exclusively.
+    Uses CareerAgent and isolated CareerToolRegistry exclusively.
     """
 
     domain: Domain = "career"
+    _session_context: Any = field(default=None, repr=False)
+    _tool_registry: Any = field(default=None, repr=False)
+    _agent: Any = field(default=None, repr=False)
+    _router: Any = field(default=None, repr=False)
+    _planner: Any = field(default=None, repr=False)
+
+    @property
+    def session_context(self) -> Any:
+        if self._session_context is None:
+            from app.computer.session_context import create_session_context
+
+            self._session_context = create_session_context(
+                user_id=self.user_id,
+                session_id=self.session_id,
+            )
+        return self._session_context
+
+    @session_context.setter
+    def session_context(self, val: Any) -> None:
+        self._session_context = val
 
     @property
     def tool_registry(self) -> Any:
-        from app.agent.tool_registry import career_tool_registry
-        return career_tool_registry
+        if self._tool_registry is None:
+            from app.agent.tool_registry import DomainBoundRegistry, ToolRegistry
+
+            self._tool_registry = DomainBoundRegistry("career", ToolRegistry())
+        return self._tool_registry
 
     @property
     def agent(self) -> Any:
-        from app.jarvis.career_agent import default_career_agent
-        return default_career_agent
+        if self._agent is None:
+            from app.jarvis.career_agent import CareerAgent
+
+            self._agent = CareerAgent()
+        return self._agent
+
+    @property
+    def router(self) -> Any:
+        if self._router is None:
+            from app.routing.router import IntentRouter
+
+            self._router = IntentRouter(planner=self.planner)
+        return self._router
+
+    @property
+    def planner(self) -> Any:
+        if self._planner is None:
+            from app.routing.planner import ExecutionPlanner
+
+            self._planner = ExecutionPlanner()
+        return self._planner
 
 
 class InMemorySessionStore:
@@ -283,6 +356,7 @@ class InMemorySessionStore:
         self,
         session_id: str | None = None,
         *,
+        user_id: str = "default",
         domain: Domain = "career",
         lock: bool = False,
     ) -> Session:
@@ -291,10 +365,12 @@ class InMemorySessionStore:
             now_iso = datetime.now(UTC).isoformat()
             if domain == "computer":
                 sess: Session = ComputerSession(
-                    session_id=key, created_at=now_iso, domain="computer"
+                    session_id=key, user_id=user_id, created_at=now_iso, domain="computer"
                 )
             else:
-                sess = CareerSession(session_id=key, created_at=now_iso, domain="career")
+                sess = CareerSession(
+                    session_id=key, user_id=user_id, created_at=now_iso, domain="career"
+                )
             if lock:
                 sess.lock_domain()
             self._sessions[key] = sess

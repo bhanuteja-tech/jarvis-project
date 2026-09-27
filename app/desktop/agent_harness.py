@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agent.task_manager import AgentTask
-from app.agent.tool_registry import default_tool_registry
+from app.agent.tool_registry import ToolRegistry
 from app.desktop.actions import ActionResult, DesktopAction
 from app.desktop.app_controller import ApplicationController, default_app_controller
 from app.desktop.browser import BrowserController, default_browser
@@ -23,7 +23,7 @@ from app.desktop.filesystem_controller import FileSystemController, default_file
 from app.desktop.messaging_controller import MessagingController, default_messaging_controller
 from app.desktop.screen_observer import ScreenObserver, default_screen_observer
 from app.desktop.state import ComputerState, default_computer_state
-from app.desktop.vault import CredentialVault, default_vault
+from app.desktop.vault import BaseCredentialVault, default_vault
 from app.desktop.vision_controller import VisionController, default_vision_controller
 from app.desktop.web_services import find_service, resolve_service_request
 from app.desktop.window_controller import WindowController, default_window_controller
@@ -60,7 +60,7 @@ class AgentHarness:
         self,
         executor: DesktopExecutor | None = None,
         browser: BrowserController | None = None,
-        vault: CredentialVault | None = None,
+        vault: BaseCredentialVault | None = None,
         app_controller: ApplicationController | None = None,
         desktop_controller: DesktopController | None = None,
         fs_controller: FileSystemController | None = None,
@@ -69,6 +69,7 @@ class AgentHarness:
         vision_controller: VisionController | None = None,
         messaging_controller: MessagingController | None = None,
         state: ComputerState | None = None,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         self.executor = executor or DesktopExecutor()
         self.browser = browser or default_browser
@@ -81,79 +82,80 @@ class AgentHarness:
         self.vision_controller = vision_controller or default_vision_controller
         self.messaging_controller = messaging_controller or default_messaging_controller
         self.state = state or default_computer_state
+        self.tool_registry = tool_registry or ToolRegistry()
         self._register_tools()
 
     def _register_tools(self) -> None:
         """Register capability handlers in the centralized ToolRegistry."""
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.OPEN_APPLICATION,
             lambda **p: self.execute_command(Intent.OPEN_APPLICATION, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.CLOSE_APPLICATION,
             lambda **p: self.execute_command(Intent.CLOSE_APPLICATION, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.FOCUS_APPLICATION,
             lambda **p: self.execute_command(Intent.FOCUS_APPLICATION, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.OPEN_FOLDER,
             lambda **p: self.execute_command(Intent.OPEN_FOLDER, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.NAVIGATE_FOLDER,
             lambda **p: self.execute_command(Intent.NAVIGATE_FOLDER, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.LIST_FILES,
             lambda **p: self.execute_command(Intent.LIST_FILES, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.SEARCH_FILES,
             lambda **p: self.execute_command(Intent.SEARCH_FILES, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.OPEN_FILE,
             lambda **p: self.execute_command(Intent.OPEN_FILE, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.BROWSER_OPEN,
             lambda **p: self.execute_command(Intent.BROWSER_OPEN, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.BROWSER_NAVIGATE,
             lambda **p: self.execute_command(Intent.BROWSER_NAVIGATE, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.BROWSER_SEARCH,
             lambda **p: self.execute_command(Intent.BROWSER_SEARCH, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.BROWSER_BACK,
             lambda **p: self.execute_command(Intent.BROWSER_BACK, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.BROWSER_FORWARD,
             lambda **p: self.execute_command(Intent.BROWSER_FORWARD, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.SCREEN_READ,
             lambda **p: self.execute_command(Intent.SCREEN_READ, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.SCREEN_ANALYZE,
             lambda **p: self.execute_command(Intent.SCREEN_ANALYZE, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.MESSAGING_SEND,
             lambda **p: self.execute_command(Intent.MESSAGING_SEND, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.CONFIRM_ACTION,
             lambda **p: self.execute_command(Intent.CONFIRM_ACTION, p),
         )
-        default_tool_registry.register(
+        self.tool_registry.register(
             Intent.REJECT_ACTION,
             lambda **p: self.execute_command(Intent.REJECT_ACTION, p),
         )
@@ -723,6 +725,29 @@ class AgentHarness:
                 )
 
             if url:
+                curr_url = (self.state.current_url or "").lower().rstrip("/")
+                tgt_url = url.lower().rstrip("/")
+                active_title = (self.state.active_window_title or "").lower()
+                is_yt_home = tgt_url in (
+                    "https://www.youtube.com",
+                    "https://youtube.com",
+                    "http://www.youtube.com",
+                    "http://youtube.com",
+                )
+                matches_target = (
+                    curr_url and (curr_url == tgt_url or curr_url == f"{tgt_url}/")
+                ) or (is_yt_home and "youtube" in active_title)
+                if matches_target:
+                    return HarnessResult(
+                        success=True,
+                        message=f"Already at {url}.",
+                        action="open_url",
+                        details={
+                            "url": url,
+                            "already_at_target": True,
+                            "computer_state": self.state.to_dict(),
+                        },
+                    )
                 try:
                     ok, msg = self.browser.navigate(url)
                 except TypeError:
@@ -765,7 +790,10 @@ class AgentHarness:
             ok, msg = self.browser.search(query, engine=service_target)
             if session is not None:
                 session.active_browser = True
-            last_u = getattr(self.browser, "last_url", None) or getattr(self.browser, "_active_url", None)
+            last_u = (
+                getattr(self.browser, "last_url", None)
+                or getattr(self.browser, "_active_url", None)
+            )
             return HarnessResult(
                 success=ok,
                 message=msg if ok else f"Could not search for '{query}': {msg}",
@@ -938,6 +966,7 @@ class AgentHarness:
 
         nav_target = target_url or resolution.url
         if nav_target:
+
             try:
                 ok, nav_msg = self.browser.navigate(
                     nav_target, service_name=resolution.service.title()

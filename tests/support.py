@@ -90,6 +90,7 @@ def make_settings(**overrides: Any) -> Settings:
         "lever_max_retries": 3,
         "searchapi_max_retries": 2,
         "career_politeness_seconds": 0.0,
+        "jarvis_allow_unauthenticated": True,
         "log_level": "WARNING",
     }
     values.update(overrides)

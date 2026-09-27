@@ -47,15 +47,15 @@ function CredentialCard({
   const serviceTitle = service ? service.charAt(0).toUpperCase() + service.slice(1) : 'Service'
 
   return (
-    <div className="mt-3 p-3.5 rounded-xl bg-gradient-to-r from-blue-950/60 to-purple-950/60 border border-blue-500/40 space-y-2.5">
-      <div className="flex items-center justify-between text-xs font-semibold text-blue-300">
+    <div className="mt-3 p-3.5 rounded bg-[#16191E] border border-[#262B35] space-y-2.5">
+      <div className="flex items-center justify-between text-xs font-semibold text-[#D97736]">
         <div className="flex items-center gap-1.5">
           <span>🔐</span>
           <span>{serviceTitle} Credential Required</span>
         </div>
-        <span className="text-[10px] text-jarvis-muted uppercase tracking-wider">{field}</span>
+        <span className="text-[10px] text-[#828997] font-mono">{field}</span>
       </div>
-      <p className="text-[11px] text-jarvis-light/80 leading-relaxed">
+      <p className="text-[11px] text-[#828997] leading-relaxed">
         Enter your {serviceTitle} {field} to save it in your local Credential Vault and open your account.
       </p>
       <div className="flex items-center gap-2">
@@ -70,7 +70,7 @@ function CredentialCard({
             }
           }}
           placeholder={`e.g. ${service === 'github' ? 'bhanuteja-tech' : 'your-handle'}`}
-          className="flex-1 bg-jarvis-surface/80 border border-blue-400/30 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-jarvis-muted/50 focus:outline-none focus:border-blue-400"
+          className="flex-1 bg-[#0E1013] border border-[#262B35] rounded px-3 py-1.5 text-xs text-[#E1E4EA] placeholder:text-[#828997]/50 focus-visible:ring-2 focus-visible:ring-[#D97736] focus-visible:outline-none"
           autoFocus
         />
         <button
@@ -79,14 +79,14 @@ function CredentialCard({
             if (val.trim()) onSubmit(val.trim())
           }}
           disabled={!val.trim()}
-          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium disabled:opacity-40 transition-all cursor-pointer"
+          className="px-3 py-1.5 rounded bg-[#D97736] hover:bg-[#D97736]/90 text-[#0E1013] text-xs font-semibold disabled:opacity-40 transition-colors cursor-pointer"
         >
           Save & Open
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="px-2.5 py-1.5 rounded-lg bg-jarvis-surface/60 hover:bg-jarvis-surface text-jarvis-muted hover:text-white text-xs transition-all cursor-pointer"
+          className="px-2.5 py-1.5 rounded bg-[#0E1013] hover:bg-[#262B35] text-[#828997] hover:text-[#E1E4EA] border border-[#262B35] text-xs transition-colors cursor-pointer"
         >
           Cancel
         </button>
@@ -269,22 +269,21 @@ export function ConversationPanel({ messages, onSendMessage, onResumeUpload }: C
             }
             if (att.kind === 'open_pdf_studio') {
               return (
-                <div key={i} className="mt-3 p-3 rounded-xl bg-gradient-to-r from-cyan-950/60 to-indigo-950/60 border border-cyan-500/40 space-y-2">
-                  <div className="flex items-center gap-1.5 text-cyan-300 text-xs font-semibold">
-                    <span>✨</span>
+                <div key={i} className="mt-3 p-3 rounded bg-[#16191E] border border-[#262B35] space-y-2">
+                  <div className="flex items-center gap-1.5 text-[#E1E4EA] text-xs font-semibold">
+                    <span>📄</span>
                     <span>Ready to Customize for {att.target_role || 'Target Role'}</span>
                   </div>
-                  <p className="text-[11px] text-jarvis-light/80 leading-relaxed">
-                    Open PDF Studio to polish sections with AI Copilot, enhance ATS keyword density, and inspect your real-time score.
+                  <p className="text-[11px] text-[#828997] leading-relaxed">
+                    Open Document Studio to inspect sections, verify evidence containment, and view ATS coverage reports.
                   </p>
                   <button
                     onClick={() => {
                       useStore.getState().setActiveWorkspace('doc-studio')
                     }}
-                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold shadow-md shadow-cyan-500/20 transition-all cursor-pointer"
+                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded bg-[#D97736] hover:bg-[#D97736]/90 text-[#0E1013] text-xs font-semibold transition-colors cursor-pointer"
                   >
-                    <span>🚀</span>
-                    <span>{att.label || 'Open in PDF Studio'}</span>
+                    <span>{att.label || 'Open in Document Studio'}</span>
                   </button>
                 </div>
               )
@@ -484,7 +483,7 @@ export function ConversationPanel({ messages, onSendMessage, onResumeUpload }: C
           <button
             onClick={handleSend}
             disabled={!inputText.trim()}
-            className="p-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 text-white hover:from-blue-500 hover:to-violet-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-lg shadow-blue-500/20 cursor-pointer"
+            className="p-2.5 rounded bg-[#D97736] hover:bg-[#D97736]/90 text-[#0E1013] font-medium disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-[#D97736]"
             title="Send message"
           >
             <Send size={16} />
@@ -497,21 +496,21 @@ export function ConversationPanel({ messages, onSendMessage, onResumeUpload }: C
           <button
             type="button"
             onClick={toggleVoiceSession}
-            className={`px-3 py-1.5 text-[11px] font-semibold rounded-full border transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 text-[11px] font-medium rounded border transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
               isVoiceActive
-                ? 'bg-red-500/20 text-red-300 border-red-500/40 hover:bg-red-500/30'
-                : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/30'
+                ? 'bg-[#E2604E]/15 text-[#E2604E] border-[#E2604E]/40 hover:bg-[#E2604E]/25'
+                : 'bg-[#16191E] text-[#D97736] border-[#262B35] hover:bg-[#262B35]'
             }`}
           >
             {isVoiceActive ? (
               <>
-                <Square size={12} className="text-red-400" />
-                STOP VOICE SESSION
+                <Square size={12} className="text-[#E2604E]" />
+                <span>Stop voice</span>
               </>
             ) : (
               <>
-                <Mic size={12} className="text-cyan-400" />
-                START VOICE SESSION
+                <Mic size={12} className="text-[#D97736]" />
+                <span>Start voice</span>
               </>
             )}
           </button>

@@ -58,6 +58,20 @@ class ActionCircuitBreaker:
         self.tripped: bool = False
         self.trip_reason: str = ""
 
+    def reset_for_task(self, task_timeout_seconds: float | None = None) -> None:
+        """Reset circuit breaker counters and timer for a new task execution."""
+        if task_timeout_seconds is not None:
+            self.task_timeout_seconds = task_timeout_seconds
+        self.start_time = time.perf_counter()
+        self.tripped = False
+        self.trip_reason = ""
+        self.total_action_count = 0
+        self.same_action_count = 0
+        self.last_action_fingerprint = None
+        self.last_observation_hash = None
+        self.no_progress_count = 0
+        self.action_retries.clear()
+
     def compute_fingerprint(
         self,
         tool_name: str,

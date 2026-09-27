@@ -92,6 +92,10 @@ export interface ComputerStateInfo {
   lastVerified: boolean | null
   lastResponse: string
   needsConfirm: boolean
+  confirmationTimeoutSeconds?: number | null
+  timeoutSeconds?: number | null
+  dangerLevel?: 'high' | 'medium' | 'critical' | null
+  blastRadius?: string | null
   stepResults: Array<{
     step_id: string
     description: string
@@ -310,6 +314,10 @@ export const useStore = create<JarvisState>((set) => ({
       lastVerified: null,
       lastResponse: '',
       needsConfirm: false,
+      confirmationTimeoutSeconds: null,
+      timeoutSeconds: null,
+      dangerLevel: null,
+      blastRadius: null,
       stepResults: [],
       latencyMetrics: null,
     }

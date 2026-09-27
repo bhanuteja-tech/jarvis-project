@@ -32,8 +32,20 @@ def session_scope(factory: sessionmaker[Session]) -> Iterator[Session]:
         session.close()
 
 
+def get_db() -> Iterator[Session]:
+    """FastAPI dependency yielding a transactional database session."""
+    from app.config.settings import get_settings
+
+    settings = get_settings()
+    engine = create_db_engine(settings.database_url)
+    factory = create_session_factory(engine)
+    with session_scope(factory) as session:
+        yield session
+
+
 __all__ = [
     "create_db_engine",
     "create_session_factory",
+    "get_db",
     "session_scope",
 ]

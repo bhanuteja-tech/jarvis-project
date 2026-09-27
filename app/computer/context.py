@@ -542,3 +542,148 @@ class TypedContext:
             "last_active_domain": self.last_active_domain,
             "pending_action": self.pending_action,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TypedContext:
+        """Reconstruct TypedContext and its domain entity objects from a dictionary."""
+        ctx = cls()
+        if not data:
+            return ctx
+
+        ctx.last_opened_folder = data.get("last_opened_folder")
+        ctx.last_opened_file = data.get("last_opened_file")
+        ctx.last_active_domain = data.get("last_active_domain", "unknown")
+        ctx.pending_action = data.get("pending_action")
+
+        for it in data.get("filesystem_results", []):
+            try:
+                ctx.filesystem_results.append(
+                    FileSystemEntity(
+                        ordinal=it.get("ordinal", 1),
+                        name=it.get("name", ""),
+                        path=it.get("path", ""),
+                        type=it.get("type", "folder"),
+                        size_bytes=it.get("size_bytes"),
+                        modified_at=it.get("modified_at"),
+                        source=it.get("source", "filesystem"),
+                        observed_at=it.get("observed_at", time.time()),
+                    )
+                )
+            except Exception:
+                pass
+
+        for it in data.get("youtube_video_results", []):
+            try:
+                ctx.youtube_video_results.append(
+                    YouTubeVideoEntity(
+                        ordinal=it.get("ordinal", 1),
+                        title=it.get("title", it.get("name", "")),
+                        url=it.get("url", ""),
+                        channel=it.get("channel"),
+                        duration=it.get("duration"),
+                        type="video",
+                        source=it.get("source", "browser_dom_cdp"),
+                        observed_at=it.get("observed_at", time.time()),
+                    )
+                )
+            except Exception:
+                pass
+
+        for it in data.get("youtube_channel_results", []):
+            try:
+                ctx.youtube_channel_results.append(
+                    YouTubeChannelEntity(
+                        ordinal=it.get("ordinal", 1),
+                        title=it.get("title", it.get("name", "")),
+                        url=it.get("url", ""),
+                        channel_id=it.get("channel_id"),
+                        type="channel",
+                        source=it.get("source", "browser_dom_cdp"),
+                        observed_at=it.get("observed_at", time.time()),
+                    )
+                )
+            except Exception:
+                pass
+
+        for it in data.get("youtube_playlist_results", []):
+            try:
+                ctx.youtube_playlist_results.append(
+                    YouTubePlaylistEntity(
+                        ordinal=it.get("ordinal", 1),
+                        title=it.get("title", it.get("name", "")),
+                        url=it.get("url", ""),
+                        video_count=it.get("video_count"),
+                        type="playlist",
+                        source=it.get("source", "browser_dom_cdp"),
+                        observed_at=it.get("observed_at", time.time()),
+                    )
+                )
+            except Exception:
+                pass
+
+        for it in data.get("browser_search_results", []):
+            try:
+                ctx.browser_search_results.append(
+                    BrowserResultEntity(
+                        ordinal=it.get("ordinal", 1),
+                        title=it.get("title", it.get("name", "")),
+                        url=it.get("url", ""),
+                        snippet=it.get("snippet"),
+                        type=it.get("type", "web_result"),
+                        source=it.get("source", "browser_dom_cdp"),
+                        observed_at=it.get("observed_at", time.time()),
+                    )
+                )
+            except Exception:
+                pass
+
+        for it in data.get("github_results", []):
+            try:
+                ctx.github_results.append(
+                    GitHubResultEntity(
+                        ordinal=it.get("ordinal", 1),
+                        title=it.get("title", it.get("name", "")),
+                        url=it.get("url", ""),
+                        username=it.get("username"),
+                        repo_name=it.get("repo_name"),
+                        type=it.get("type", "github_result"),
+                        source=it.get("source", "browser_dom_cdp"),
+                        observed_at=it.get("observed_at", time.time()),
+                    )
+                )
+            except Exception:
+                pass
+
+        for it in data.get("open_windows", []):
+            try:
+                ctx.open_windows.append(
+                    WindowEntity(
+                        ordinal=it.get("ordinal", 1),
+                        title=it.get("title", it.get("name", "")),
+                        process_name=it.get("process_name", ""),
+                        window_id=it.get("window_id"),
+                        is_active=it.get("is_active", False),
+                        source=it.get("source", "os_window"),
+                        observed_at=it.get("observed_at", time.time()),
+                    )
+                )
+            except Exception:
+                pass
+
+        for it in data.get("browser_tabs", []):
+            try:
+                ctx.browser_tabs.append(
+                    BrowserTabEntity(
+                        ordinal=it.get("ordinal", 1),
+                        title=it.get("title", it.get("name", "")),
+                        url=it.get("url", ""),
+                        tab_id=it.get("tab_id"),
+                        is_active=it.get("is_active", False),
+                        source=it.get("source", "browser_tab"),
+                        observed_at=it.get("observed_at", time.time()),
+                    )
+                )
+            except Exception:
+                pass
+
+        return ctx

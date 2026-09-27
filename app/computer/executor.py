@@ -23,7 +23,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
-from app.agent.task_manager import TaskLifecycle, default_task_manager
+from app.agent.task_manager import TaskLifecycle
 from app.computer.intent_extractor import ComputerIntentExtractor, default_extractor
 from app.computer.reference_resolver import ReferenceResolver, default_resolver
 from app.computer.response_generator import (
@@ -36,7 +36,6 @@ from app.computer.semantic_planner import (
     TaskPlan,
     TaskStep,
     VerificationStrategy,
-    default_planner,
 )
 from app.computer.web_context_tracker import WebContextTracker, default_web_context_tracker
 from app.desktop.observer import ComputerObserver, default_observer
@@ -259,7 +258,7 @@ class ComputerExecutor:
         dispatcher: HarnessDispatcher | None = None,
     ) -> None:
         self._extractor = extractor or default_extractor
-        self._planner = planner or default_planner
+        self._planner = planner or SemanticTaskPlanner()
         self._resolver = resolver or default_resolver
         self._observer = observer or default_observer
         self._verifier = verifier or default_verifier
@@ -283,8 +282,14 @@ class ComputerExecutor:
         and converts events to WebSocket envelopes.
         """
         # Task lifecycle & generation management
-        task_gen = generation if generation is not None else default_task_manager.current_generation
-        task = default_task_manager.create_task(intent=text, generation=task_gen)
+        task_mgr = getattr(session, "task_manager", None)
+        if task_mgr is None:
+            from app.agent.task_manager import TaskManager
+
+            task_mgr = TaskManager()
+
+        task_gen = generation if generation is not None else task_mgr.current_generation
+        task = task_mgr.create_task(intent=text, generation=task_gen)
         self._state.current_generation = task_gen
         self._state.current_task_id = task.task_id
 
@@ -321,7 +326,7 @@ class ComputerExecutor:
         )
 
         # Check for generation invalidation / stale task
-        if task.is_stale() or not default_task_manager.is_generation_valid(task_gen):
+        if task.is_stale() or not task_mgr.is_generation_valid(task_gen):
             logger.warning("[TELEMETRY] Task %s (gen %d) is stale after planning; aborting", task.task_id, task_gen)
             return
 
@@ -346,7 +351,7 @@ class ComputerExecutor:
         step_results: list[dict[str, Any]] = []
 
         for i, step in enumerate(plan.steps):
-            if task.is_stale() or not default_task_manager.is_generation_valid(task_gen):
+            if task.is_stale() or not task_mgr.is_generation_valid(task_gen):
                 logger.warning("[TELEMETRY] Task %s is stale at step %d; aborting", task.task_id, i)
                 return
 
@@ -395,7 +400,7 @@ class ComputerExecutor:
             # ACT
             harness_result = self._act(step, session=session)
 
-            if task.is_stale() or not default_task_manager.is_generation_valid(task_gen):
+            if task.is_stale() or not task_mgr.is_generation_valid(task_gen):
                 logger.warning("[TELEMETRY] Task %s is stale after ACT; aborting", task.task_id)
                 return
 
@@ -510,7 +515,7 @@ class ComputerExecutor:
                     return
 
         # --- Phase 5: RESPOND ---
-        if task.is_stale() or not default_task_manager.is_generation_valid(task_gen):
+        if task.is_stale() or not task_mgr.is_generation_valid(task_gen):
             logger.warning("[TELEMETRY] Task %s is stale before response; aborting response emission", task.task_id)
             return
 

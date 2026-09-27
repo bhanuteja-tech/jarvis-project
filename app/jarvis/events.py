@@ -9,6 +9,7 @@ Unknown event types must be ignored by clients (forward compatibility).
 
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -72,6 +73,45 @@ class EventType(StrEnum):
     ACKNOWLEDGEMENT = "acknowledgement"
     OBSERVATION_UPDATED = "observation_updated"
     CIRCUIT_BREAKER_TRIPPED = "circuit_breaker_tripped"
+    # -----------------------------------------------------------------------
+    # Step 4 (Remote Agent Protocol)
+    # -----------------------------------------------------------------------
+    ACTION_REQUEST = "action_request"
+    ACTION_RESULT = "action_result"
+
+
+@dataclass
+class ActionRequestPayload:
+    """Outbound action request sent to remote jarvis_agent on user desktop."""
+
+    action_id: str
+    session_id: str
+    step_id: str
+    tool: str
+    params: dict[str, Any] = field(default_factory=dict)
+    requires_confirmation: bool = False
+    confirmation_prompt: str | None = None
+    timeout_seconds: float = 30.0
+    confirmation_timeout_seconds: float = 120.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ActionResultPayload:
+    """Inbound action result received from remote jarvis_agent."""
+
+    action_id: str
+    step_id: str
+    success: bool
+    message: str = ""
+    cancelled: bool = False
+    details: dict[str, Any] = field(default_factory=dict)
+    observation: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 def make_event(
@@ -90,4 +130,9 @@ def make_event(
     }
 
 
-__all__ = ["EventType", "make_event"]
+__all__ = [
+    "ActionRequestPayload",
+    "ActionResultPayload",
+    "EventType",
+    "make_event",
+]

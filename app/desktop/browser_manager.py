@@ -1,9 +1,12 @@
 """BrowserManager for JARVIS.
 
 Central controller for browser lifecycle, target resolution, and tab reuse:
-1. Maintains authoritative BrowserSession state (browser, window, context, pages, active_page, url, title, domain).
-2. Enforces explicit vs implicit browser resolution ("Open YouTube in Edge" -> Edge explicit, "Open YouTube" -> default policy).
-3. Reuses existing compatible pages to prevent duplicate tabs when navigating or searching services (e.g. YouTube).
+1. Maintains authoritative BrowserSession state (browser, window, context,
+   pages, active_page, url, title, domain).
+2. Enforces explicit vs implicit browser resolution ("Open YouTube in Edge" ->
+   Edge explicit, "Open YouTube" -> default policy).
+3. Reuses existing compatible pages to prevent duplicate tabs when navigating
+   or searching services (e.g. YouTube).
 4. Verifies foreground window and URL/title postconditions.
 """
 
@@ -184,7 +187,8 @@ class BrowserManager:
             self.session.window_id = verified_win["window_id"]
             self.session.hwnd = verified_win["hwnd"]
             if url:
-                page, _ = self.session.record_or_reuse_page(url, title=verified_win.get("title", display))
+                win_title = verified_win.get("title", display)
+                page, _ = self.session.record_or_reuse_page(url, title=win_title)
             self.state.update(
                 active_application=display,
                 active_window_id=verified_win["window_id"],
@@ -206,15 +210,48 @@ class BrowserManager:
         verify_domain: str | None = None,
         verify_timeout: float = 3.0,
     ) -> tuple[bool, str]:
-        """Navigate page with strict reuse of existing compatible tab."""
+        """Navigate page with strict reuse of existing compatible tab and idempotency."""
         canonical, _ = self.resolve_browser_target(explicit_browser)
 
         if not url.startswith(("http://", "https://")):
             url = f"https://{url}"
 
+        # 1. Idempotency check: if current URL / title already matches requested target
+        url_clean = url.lower().rstrip("/")
+        curr_url = (self.state.current_url or "").lower().rstrip("/")
+        active_win = self.window_controller.get_active_window()
+        active_title = (active_win.get("title") or "").lower() if active_win else ""
+
+        target_domain = extract_domain(url_clean) or url_clean
+        is_homepage = url_clean in (
+            f"https://{target_domain}",
+            f"https://www.{target_domain}",
+            f"http://{target_domain}",
+            f"http://www.{target_domain}",
+        )
+        is_already_at_target = False
+        if curr_url and (curr_url == url_clean or curr_url == f"{url_clean}/"):
+            is_already_at_target = True
+        elif is_homepage and target_domain and "youtube" in target_domain and (
+            "youtube.com" in curr_url or "youtube" in active_title
+        ):
+            is_already_at_target = True
+        elif is_homepage and target_domain and target_domain in curr_url:
+            is_already_at_target = True
+
         win = self.find_browser_window(canonical)
+        if is_already_at_target and not force_new_tab:
+            if win:
+                self.window_controller.bring_to_front(win["hwnd"])
+            display = self.display_name(canonical)
+            service_label = service_name or ("YouTube" if "youtube.com" in url else "Page")
+            logger.info("BrowserManager.navigate: already at target %s (idempotent skip)", url)
+            return True, f"{service_label} is already open and active."
+
         if not win:
-            ok, msg = self.open_browser(browser_name=canonical, url=url, explicit=bool(explicit_browser))
+            ok, msg = self.open_browser(
+                browser_name=canonical, url=url, explicit=bool(explicit_browser)
+            )
             return ok, msg
 
         self.window_controller.bring_to_front(win["hwnd"])
@@ -234,15 +271,17 @@ class BrowserManager:
         self.state.update(
             active_application=display,
             active_window_id=win["window_id"],
+            current_url=url,
             last_action="navigate",
         )
         self._sync_state()
 
-        # Window title verification if requested
+        # Bounded window title verification (never require networkidle or wait indefinitely)
         verified = False
         verify_reason = "optimistic"
-        if verify_domain:
-            domain_clean = verify_domain.lower().rstrip("/")
+        check_domain = verify_domain or target_domain
+        if check_domain:
+            domain_clean = check_domain.lower().rstrip("/")
             if domain_clean.startswith(("http://", "https://")):
                 domain_clean = extract_domain(domain_clean) or domain_clean
 
@@ -251,16 +290,28 @@ class BrowserManager:
                 active = self.window_controller.get_active_window()
                 if active:
                     title = (active.get("title") or "").lower()
-                    if domain_clean in title:
+                    if domain_clean in title or ("youtube" in domain_clean and "youtube" in title):
                         verified = True
-                        verify_reason = f"window title contains '{verify_domain}'"
+                        verify_reason = f"window title contains '{check_domain}'"
                         break
                 time.sleep(0.05)
+
+            # CRITICAL RULE: TIMEOUT DOES NOT MEAN ACTION FAILED
             if not verified:
-                verify_reason = f"window title did not contain '{verify_domain}' within {verify_timeout}s"
+                active = self.window_controller.get_active_window()
+                active_t = (active.get("title") or "").lower() if active else ""
+                if domain_clean in active_t or (
+                    "youtube" in domain_clean and "youtube" in active_t
+                ):
+                    verified = True
+                    verify_reason = f"observed target '{check_domain}' in active window"
+                else:
+                    verify_reason = (
+                        f"window title did not contain '{check_domain}' within {verify_timeout}s"
+                    )
 
         self.state.last_verified = verified
-        self.state.last_verify_method = "window_title_poll" if verify_domain else "none"
+        self.state.last_verify_method = "window_title_poll" if check_domain else "none"
         self.state.last_verify_reason = verify_reason
 
         return True, f"{service_label} is open. What would you like me to do next?"

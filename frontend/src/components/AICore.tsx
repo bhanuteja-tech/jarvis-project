@@ -1,58 +1,28 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
+import { Activity, CheckCircle2, Mic, Terminal } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { continuousVoiceController, VoiceSessionState } from '../utils/ContinuousVoiceController'
 
-const ORB_CLASSES: Record<string, string> = {
-  idle: 'ai-orb',
-  listening: 'ai-orb',
-  transcribing: 'ai-orb-analyzing',
-  routing: 'ai-orb',
-  executing: 'ai-orb-searching',
-  observing: 'ai-orb-analyzing',
-  thinking: 'ai-orb',
-  searching: 'ai-orb-searching',
-  analyzing: 'ai-orb-analyzing',
-  speaking: 'ai-orb',
-  interrupted: 'ai-orb-error',
-  ending: 'ai-orb-analyzing',
-  ended: 'ai-orb',
-  error: 'ai-orb-error',
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  idle: 'text-cyan-400',
-  listening: 'text-amber-400',
-  transcribing: 'text-blue-400',
-  routing: 'text-violet-400',
-  executing: 'text-cyan-400',
-  observing: 'text-purple-400',
-  thinking: 'text-blue-400',
-  searching: 'text-cyan-400',
-  analyzing: 'text-violet-400',
-  speaking: 'text-emerald-400',
-  interrupted: 'text-orange-400',
-  ending: 'text-rose-400',
-  ended: 'text-zinc-400',
-  error: 'text-red-400',
-}
-
-const VOICE_LABELS: Record<VoiceSessionState, string> = {
-  IDLE: 'READY',
-  LISTENING: 'LISTENING',
-  TRANSCRIBING: 'UNDERSTANDING',
-  ROUTING: 'THINKING',
-  EXECUTING: 'EXECUTING',
-  OBSERVING: 'OBSERVING',
-  SPEAKING: 'SPEAKING',
-  INTERRUPTED: 'INTERRUPTED',
-  ENDING: 'ENDING',
-  ENDED: 'SESSION ENDED',
-  ERROR: 'ERROR',
+const STATE_MAPPINGS: Record<string, { label: string; mode: 'idle' | 'active' | 'warning' | 'verified' | 'error'; note: string }> = {
+  idle: { label: 'Standby', mode: 'idle', note: 'Awaiting voice or keyboard instruction' },
+  listening: { label: 'Listening', mode: 'active', note: 'Acoustic input active — speak freely' },
+  transcribing: { label: 'Processing audio', mode: 'active', note: 'Interpreting speech phonemes' },
+  routing: { label: 'Planning steps', mode: 'active', note: 'Mapping goal to OS commands' },
+  executing: { label: 'Executing action', mode: 'warning', note: 'Dispatched to local agent on your machine' },
+  observing: { label: 'Observing screen', mode: 'active', note: 'Grounding state against visible window titles' },
+  thinking: { label: 'Evaluating state', mode: 'active', note: 'Validating safety boundaries' },
+  searching: { label: 'Querying filesystem', mode: 'active', note: 'Searching local directory tree' },
+  analyzing: { label: 'Verifying outcome', mode: 'active', note: 'Checking post-execution evidence' },
+  speaking: { label: 'Responding', mode: 'verified', note: 'Streaming audio feedback' },
+  interrupted: { label: 'Interrupted', mode: 'error', note: 'Execution halted by user barge-in' },
+  ending: { label: 'Closing session', mode: 'idle', note: 'Terminating channel' },
+  ended: { label: 'Session ended', mode: 'idle', note: 'Standby' },
+  error: { label: 'Action failed', mode: 'error', note: 'Execution halted or connection timed out' },
 }
 
 export function AICore() {
-  const { aiCoreState: storeState, aiCoreLabel: storeLabel } = useStore()
+  const { aiCoreState: storeState, computerState } = useStore()
   const [voiceState, setVoiceState] = useState<VoiceSessionState>('IDLE')
   const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false)
 
@@ -65,153 +35,113 @@ export function AICore() {
     return unsub
   }, [])
 
-  // In voice mode, the voice controller is authoritative
-  const effectiveState = isVoiceActive ? voiceState.toLowerCase() : storeState
-  const effectiveLabel = isVoiceActive
-    ? `● ${VOICE_LABELS[voiceState] || voiceState}`
-    : storeLabel
+  const rawState = isVoiceActive ? voiceState.toLowerCase() : storeState
+  const currentConfig = STATE_MAPPINGS[rawState] || STATE_MAPPINGS.idle
 
-  const isActive = isVoiceActive
-    ? voiceState !== 'IDLE' && voiceState !== 'ENDED'
-    : storeState !== 'idle'
+  const isExecuting = rawState === 'executing' || rawState === 'searching'
+  const isListening = rawState === 'listening' || rawState === 'transcribing'
+  const isSpeaking = rawState === 'speaking'
+  const isError = rawState === 'error' || rawState === 'interrupted'
 
-  const orbClass = ORB_CLASSES[effectiveState] || 'ai-orb'
-  const statusColor = STATUS_COLORS[effectiveState] || 'text-cyan-400'
+  // Generate 20 calibrated spectrometer bars
+  const bars = useMemo(() => Array.from({ length: 24 }), [])
 
   return (
-    <div className="relative flex items-center justify-center select-none">
-      {/* Outermost ring — slow spin */}
-      <motion.div
-        className="absolute w-72 h-72 rounded-full border border-jarvis-border/20"
-        animate={{ rotate: 360 }}
-        transition={{ duration: 30, repeat: Infinity, ease: 'linear' }}
-      >
-        {/* Ring markers */}
-        {[0, 90, 180, 270].map((deg) => (
-          <div
-            key={deg}
-            className="absolute w-1.5 h-1.5 rounded-full bg-jarvis-accent/30"
-            style={{
-              top: '50%',
-              left: '50%',
-              transform: `rotate(${deg}deg) translateX(144px) translate(-50%, -50%)`,
-            }}
+    <div className="w-full max-w-xl mx-auto rounded border border-[#262B35] bg-[#16191E] p-4 text-[#E1E4EA] select-none">
+      {/* Top Header Rail */}
+      <div className="flex items-center justify-between border-b border-[#262B35] pb-3 text-xs">
+        <div className="flex items-center gap-2">
+          {/* Signal Indicator Dot */}
+          <span
+            className={`w-2 h-2 rounded-full ${
+              isError
+                ? 'bg-[#E2604E]'
+                : isExecuting
+                ? 'bg-[#D97736] animate-pulse'
+                : isListening
+                ? 'bg-[#D97736]'
+                : isSpeaking
+                ? 'bg-[#2EA069]'
+                : 'bg-[#828997]/50'
+            }`}
           />
-        ))}
-      </motion.div>
+          <span className="font-medium text-[#E1E4EA]">{currentConfig.label}</span>
+          <span className="text-[#828997] font-mono text-[11px]">[{rawState}]</span>
+        </div>
 
-      {/* Middle ring — counter-rotate */}
-      <motion.div
-        className="absolute w-56 h-56 rounded-full ai-orb-ring"
-        animate={{ rotate: isActive ? -360 : 0 }}
-        transition={{
-          duration: isActive ? 8 : 0,
-          repeat: isActive ? Infinity : 0,
-          ease: 'linear',
-        }}
-      />
+        <div className="flex items-center gap-3 text-[#828997] font-mono text-[11px]">
+          <span className="flex items-center gap-1">
+            <Terminal size={12} className="text-[#828997]" />
+            <span>PID: verified</span>
+          </span>
+          <span className="flex items-center gap-1">
+            <Mic size={12} className={isListening ? 'text-[#D97736]' : 'text-[#828997]'} />
+            <span>{isListening ? 'Audio live' : 'Muted'}</span>
+          </span>
+        </div>
+      </div>
 
-      {/* Pulse rings — visible when active */}
-      {isActive && (
-        <>
-          <motion.div
-            className="absolute w-48 h-48 rounded-full border-2 border-blue-500/30"
-            animate={{ scale: [1, 1.6], opacity: [0.3, 0] }}
-            transition={{ duration: 2, repeat: Infinity, ease: 'easeOut' }}
-          />
-          <motion.div
-            className="absolute w-48 h-48 rounded-full border-2 border-violet-500/20"
-            animate={{ scale: [1, 1.8], opacity: [0.2, 0] }}
-            transition={{ duration: 2.5, repeat: Infinity, ease: 'easeOut', delay: 0.3 }}
-          />
-        </>
-      )}
+      {/* Central Calibrated Spectrometer / Reticle */}
+      <div className="py-5 px-2">
+        <div className="flex items-end justify-between h-14 gap-1 px-4 bg-[#0E1013] rounded border border-[#262B35]/70">
+          {bars.map((_, i) => {
+            // Predictable, calm bar height based on real operational state
+            const centerDistance = Math.abs(i - 12) / 12
+            const baseFactor = 1 - centerDistance * 0.4
+            
+            let height = 4 // minimum baseline floor
+            let color = '#262B35' // idle hairline
 
-      {/* Main ORB */}
-      <motion.div
-        className={`w-40 h-40 rounded-full ${orbClass} relative`}
-        animate={{
-          scale: isActive ? [1, 1.06, 1] : [1, 1.02, 1],
-        }}
-        transition={{
-          duration: isActive ? 1.5 : 4,
-          repeat: Infinity,
-          ease: 'easeInOut',
-        }}
-      >
-        {/* Inner light */}
-        <motion.div
-          className="absolute inset-6 rounded-full bg-white/10"
-          animate={{
-            opacity: isActive ? [0.1, 0.3, 0.1] : [0.05, 0.15, 0.05],
-          }}
-          transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-        />
+            if (isListening) {
+              const variance = ((i * 17) % 7) * 4
+              height = Math.max(6, Math.min(48, variance * baseFactor + 8))
+              color = '#D97736'
+            } else if (isSpeaking) {
+              const variance = ((i * 23) % 9) * 4.5
+              height = Math.max(6, Math.min(44, variance * baseFactor + 6))
+              color = '#2EA069'
+            } else if (isExecuting) {
+              const variance = ((i * 13) % 5) * 5
+              height = Math.max(6, Math.min(36, variance + 6))
+              color = '#D97736'
+            } else if (isError) {
+              height = 8
+              color = '#E2604E'
+            }
 
-        {/* Hot spot */}
-        <div
-          className="absolute w-4 h-4 rounded-full bg-white/25 blur-sm"
-          style={{ top: '25%', left: '30%' }}
-        />
-      </motion.div>
+            return (
+              <motion.div
+                key={i}
+                className="flex-1 rounded-t-sm"
+                style={{ backgroundColor: color }}
+                animate={{ height: `${height}px` }}
+                transition={{ duration: 0.15, ease: 'easeOut' }}
+              />
+            )
+          })}
+        </div>
+      </div>
 
-      {/* Orbiting particles */}
-      {[0, 1, 2].map((i) => (
-        <motion.div
-          key={i}
-          className="absolute w-2 h-2 rounded-full"
-          style={{
-            background: i === 0 ? '#60a5fa' : i === 1 ? '#a78bfa' : '#22d3ee',
-            boxShadow: `0 0 8px ${i === 0 ? '#60a5fa' : i === 1 ? '#a78bfa' : '#22d3ee'}`,
-            top: '50%',
-            left: '50%',
-            // CSS custom property for orbit radius
-            ['--orbit-radius' as any]: '100px',
-          }}
-          animate={{
-            rotate: 360,
-            x: [
-              Math.cos(((i * 120) * Math.PI) / 180) * 100,
-              Math.cos(((i * 120 + 360) * Math.PI) / 180) * 100,
-            ],
-            y: [
-              Math.sin(((i * 120) * Math.PI) / 180) * 100,
-              Math.sin(((i * 120 + 360) * Math.PI) / 180) * 100,
-            ],
-          }}
-          transition={{
-            duration: isActive ? 6 : 12,
-            repeat: Infinity,
-            ease: 'linear',
-            delay: i * (isActive ? 2 : 4),
-          }}
-        />
-      ))}
-
-      {/* Status label */}
-      <motion.div
-        className="absolute -bottom-20 left-1/2 -translate-x-1/2 text-center"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        key={effectiveLabel}
-      >
-        <p className={`text-xs font-semibold tracking-[0.2em] uppercase ${statusColor}`}>
-          {effectiveLabel}
-        </p>
-        {isActive && (
-          <motion.div
-            className="mx-auto mt-2 w-16 h-0.5 rounded-full progress-bar"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-          />
-        )}
-      </motion.div>
-
-      {/* "JARVIS" watermark */}
-      <div className="absolute -bottom-32 left-1/2 -translate-x-1/2">
-        <p className="text-[10px] font-light tracking-[0.5em] text-jarvis-muted/30 uppercase">
-          J.A.R.V.I.S
-        </p>
+      {/* Bottom Telemetry Note & Action Guard */}
+      <div className="flex items-center justify-between text-xs text-[#828997] pt-2 border-t border-[#262B35] font-mono">
+        <span className="truncate pr-4 font-sans text-xs text-[#828997]">
+          {currentConfig.note}
+        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          {computerState.lastVerified ? (
+            <span className="inline-flex items-center gap-1 text-[#2EA069] text-[11px]">
+              <CheckCircle2 size={12} />
+              <span>State verified</span>
+            </span>
+          ) : isExecuting ? (
+            <span className="inline-flex items-center gap-1 text-[#D97736] text-[11px]">
+              <Activity size={12} className="animate-spin" />
+              <span>Step in progress</span>
+            </span>
+          ) : (
+            <span className="text-[11px] text-[#828997]">Safety interlock armed</span>
+          )}
+        </div>
       </div>
     </div>
   )

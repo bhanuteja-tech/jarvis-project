@@ -1,170 +1,95 @@
 import { Link } from 'react-router-dom'
 import {
-  Mic,
-  Search,
-  Cpu,
-  Target,
-  FileCheck,
+  Laptop,
   ShieldCheck,
+  Key,
+  Eye,
   ArrowRight,
-  CheckCircle2,
-  Layers
+  Lock
 } from 'lucide-react'
 
-const FEATURE_CATEGORIES = [
+const CAPABILITY_PILLARS = [
   {
-    id: 'voice',
-    title: 'Voice Sovereignty & Real-Time Orchestration',
-    subtitle: 'Conversational voice built for speed, safety, and instant user interruption.',
-    icon: Mic,
-    color: 'text-cyan-400',
-    borderColor: 'border-cyan-500/30',
-    features: [
+    id: 'permissions',
+    title: 'The Human Gate & Permission Architecture',
+    tagline: 'High-risk operations cannot happen on your machine without your active consent.',
+    icon: Key,
+    accent: '#D97736',
+    items: [
       {
-        name: 'Instant Barge-In (Sub-18ms Interruption)',
-        description: 'Speak at any moment while JARVIS is responding. The client immediately mutes audio output and cleanly renews the execution task without state corruption.',
+        name: 'The Safety Interlock Barrier',
+        desc: 'Before executing any destructive operation (e.g. deleting files, dispatching outbound emails or WhatsApp messages, installing packages), the agent pauses and presents the exact blast radius for your physical approval.',
       },
       {
-        name: 'FastIntentRouter Dual Path (180ms TTFT)',
-        description: 'High-frequency workspace navigation and filtering commands run through a deterministic regex grammar, bypassing cloud LLMs for near-instant execution.',
+        name: 'Independent Timeout Clock',
+        desc: 'Confirmation prompts run on their own countdown timer (default 30 seconds). If you step away from your keyboard and do not approve the prompt, the action aborts cleanly rather than executing in your absence.',
       },
       {
-        name: 'Client-Side VAD & Privacy Isolation',
-        description: 'Voice Activity Detection executes locally in your browser. Audio streams are kept in volatile memory and never retained or uploaded to third-party ad networks.',
-      },
-      {
-        name: 'Web Speech API & Local STT/TTS Fallback',
-        description: 'Seamless browser-native voice synthesis with optional local Whisper/Piper STT/TTS backend protocols.',
+        name: 'No Ambient Auto-Approval',
+        desc: 'Automatic approval is intentionally locked behind a verbose, explicit flag (--i-understand-this-disables-safety-prompts). The agent cannot silently default to bypass prompts.',
       },
     ],
   },
   {
-    id: 'discovery',
-    title: 'Multi-Source Radar & Deduplication',
-    subtitle: 'Authentic job opportunities fetched directly from primary ATS APIs.',
-    icon: Search,
-    color: 'text-blue-400',
-    borderColor: 'border-blue-500/30',
-    features: [
+    id: 'device-isolation',
+    title: 'Physical Device Identity & Disconnect Recovery',
+    tagline: 'Your computer is protected against transient network drops and unauthorized device takeovers.',
+    icon: Laptop,
+    accent: '#2EA069',
+    items: [
       {
-        name: 'Direct Greenhouse & Lever Public Adapters',
-        description: 'Zero screen scraping. Connects directly to public ATS endpoints with jittered exponential backoff and strict token sanitization.',
+        name: 'Persistent Hardware Device ID',
+        desc: 'Every local agent companion is issued a persistent hardware identifier (~/.jarvis/device_id). Only the exact physical machine that started an action can reconnect and resume it.',
       },
       {
-        name: 'Cross-Source Entity Resolution & Deduplication',
-        description: 'Clusters cross-posted jobs across multiple platforms, preserving the earliest source while consolidating distinct application endpoints.',
+        name: '15-Second Disconnect Grace Period',
+        desc: 'If your laptop sleeps or your Wi-Fi blips mid-task, Jarvis freezes in-flight actions for 15 seconds. If your machine reconnects within the window, execution resumes cleanly without failure.',
       },
       {
-        name: 'Zero Timestamp Manufacture',
-        description: 'Internal timestamps are UTC-aware and never hallucinated from vague display strings like "posted recently". Missing source dates remain explicitly None.',
-      },
-      {
-        name: 'Google Jobs Engine Integration',
-        description: 'Safe discovery integration with strict query whitelisting to eliminate quota burning and raw external URL execution.',
+        name: 'Duplicate Connection Rejection',
+        desc: 'If another machine attempts to bind to your session during an active run or grace period, it is rejected immediately with a policy violation. A second computer can never quietly hijack control.',
       },
     ],
   },
   {
-    id: 'jd',
-    title: 'Untrusted JD Understanding Engine',
-    subtitle: 'Deterministic skill and requirement extraction with verifiable provenance.',
-    icon: Cpu,
-    color: 'text-violet-400',
-    borderColor: 'border-violet-500/30',
-    features: [
+    id: 'grounding',
+    title: 'Zero-Guess Grounding & Context Awareness',
+    tagline: 'The agent navigates your desktop by inspecting verified system state, not guessing.',
+    icon: Eye,
+    accent: '#828997',
+    items: [
       {
-        name: 'Untrusted Data Security Model',
-        description: 'External job descriptions are fenced, script/style stripped, and character capped (JD_MAX_CHARS) to prevent prompt injection attacks.',
+        name: 'Verified Application & Window Tracking',
+        desc: 'Jarvis tracks the real active window title, process ID, and filesystem directory before and after every step. It never assumes an application launched just because it issued a launch command.',
       },
       {
-        name: 'Verifiable Evidence Architecture',
-        description: 'Every extracted requirement, skill, and qualification carries Evidence{text, field, method, confidence} directly quoting the raw posting.',
+        name: 'Natural Follow-Up Memory',
+        desc: 'When you say "How many folders are in my Documents?", then "What are those?", and then "Open the second one", the agent resolves the ordinal reference against verified filesystem items rather than confusing it with a web tab.',
       },
       {
-        name: 'Curated 400+ Skill Taxonomy & Negative Guards',
-        description: 'Recognizes industry technologies while applying negative-context guards (e.g., "no Kubernetes experience needed" will not match Kubernetes).',
-      },
-      {
-        name: 'Currency-Anchored Salary Deconstruction',
-        description: 'Converts compensation prose into structured min/max bounds only when anchored by unambiguous currency tokens.',
+        name: 'Sub-18ms Voice Barge-In',
+        desc: 'You can interrupt Jarvis at any time by speaking. Audio playback cuts off within 18 milliseconds, the agent clears pending narration, and adapts immediately to your spoken correction.',
       },
     ],
   },
   {
-    id: 'matching',
-    title: '8-Factor Deterministic Match Engine',
-    subtitle: 'Explainable, pure mathematical scoring with zero black-box bias.',
-    icon: Target,
-    color: 'text-emerald-400',
-    borderColor: 'border-emerald-500/30',
-    features: [
+    id: 'privacy',
+    title: 'Local Privacy & Strict Domain Boundaries',
+    tagline: 'Your files, credentials, and browsing state remain on your hardware.',
+    icon: Lock,
+    accent: '#2EA069',
+    items: [
       {
-        name: 'Fixed Weight Scoring Architecture',
-        description: 'Required Skills (30), Preferred Skills (10), Experience (20), Location (12), Employment Type (10), Education (8), Level (5), Salary (5).',
+        name: 'Zero Cloud Sandbox Uploads',
+        desc: 'Actions are dispatched to your machine through jarvis_agent. Your browser sessions, cookies, downloaded documents, and project folders stay strictly local.',
       },
       {
-        name: 'Tiered Affinity Classification',
-        description: 'Clear classification into Strong (≥75%) and Moderate (≥50%) tiers. Missing job data never triggers hard rejections; evidence gaps are labeled.',
+        name: 'Domain-Exclusive Endpoints',
+        desc: 'Sessions are hard-locked to their respective domain (/ws/computer vs /ws/career). Career search tools cannot touch desktop APIs, and computer control tools cannot access unrelated resume profiles.',
       },
       {
-        name: 'Explicit Gap Analysis',
-        description: 'Instantly surfaces exactly which requirements are missing or unaddressed, providing candidates with actionable feedback rather than silent rejections.',
-      },
-      {
-        name: 'Deterministic Tie-Breaking',
-        description: 'Identical scores break deterministically based on verified required skill count, then experience duration, eliminating random shuffling.',
-      },
-    ],
-  },
-  {
-    id: 'tailoring',
-    title: 'Truth-Guarded Resume Tailoring',
-    subtitle: 'Dynamic re-alignment strictly constrained to candidate profile evidence.',
-    icon: FileCheck,
-    color: 'text-cyan-400',
-    borderColor: 'border-cyan-500/30',
-    features: [
-      {
-        name: 'Mathematical Token Containment Guard',
-        description: 'Enforces C_tailored ⊆ C_candidate. Tailored resumes may emphasize or re-order existing achievements, but can NEVER invent new claims.',
-      },
-      {
-        name: 'Immutable Profile Source of Truth',
-        description: 'The candidate profile is never modified during tailoring. Tailoring generates a fresh artifact without contaminating your master history.',
-      },
-      {
-        name: 'Verifiable Summary Synthesis',
-        description: 'Generates professional career summaries composed exclusively of verified facts, technologies, and quantified achievements.',
-      },
-      {
-        name: 'Missing Requirement Insulation',
-        description: 'Unaddressed JD requirements are surfaced in a separate candidate advisory pane, never covertly inserted into your resume.',
-      },
-    ],
-  },
-  {
-    id: 'validation',
-    title: 'T1–T10 Truth & A1–A8 ATS Audit',
-    subtitle: 'Automated dual-layer audit guaranteeing fact containment and ATS compliance.',
-    icon: ShieldCheck,
-    color: 'text-amber-400',
-    borderColor: 'border-amber-500/30',
-    features: [
-      {
-        name: 'T1–T10 Truth Verification (Immediate FAIL)',
-        description: 'Validates original-text fidelity, evidence-ref resolvability, unsupported-skill detection, employer/title/date consistency, and duplicate suppression.',
-      },
-      {
-        name: 'A1–A8 ATS Compliance Audits (Advisory WARN)',
-        description: 'Measures keyword coverage %, responsibility token overlap, keyword density caps (<2x to prevent stuffing), and clean standard date-range separators.',
-      },
-      {
-        name: 'T9 PII Quarantine & Zero-Retention Audit',
-        description: 'Verifies that candidate phone numbers, emails, and street addresses are quarantined and never present in narration streams or public outputs.',
-      },
-      {
-        name: 'Read-Only Integrity Guarantee',
-        description: 'The validation node is strictly read-only. It reports objective scores and warnings without silently mutating or corrupting the tailored artifact.',
+        name: 'Quarantined Personal Data',
+        desc: 'Sensitive user credentials and contact information are stored in an encrypted vault and never injected into conversational LLM prompts.',
       },
     ],
   },
@@ -172,86 +97,102 @@ const FEATURE_CATEGORIES = [
 
 export function FeaturesPage() {
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-16">
-      {/* Header */}
-      <div className="text-center space-y-4 max-w-3xl mx-auto">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-cyan-400 text-xs font-mono font-semibold">
-          <Layers size={13} />
-          <span>CAPABILITY MATRIX</span>
-        </div>
-        <h1 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight">
-          Engineered Without Compromise
-        </h1>
-        <p className="text-base text-jarvis-muted leading-relaxed">
-          Explore the technical capabilities powering JARVIS. Every feature is deterministically designed to maximize job search precision while guaranteeing zero hallucination.
-        </p>
+    <div className="min-h-screen bg-[#0E1013] text-[#E1E4EA] selection:bg-[#D97736]/20 selection:text-[#E1E4EA] pb-20">
+      {/* Header Rail */}
+      <div className="border-b border-[#262B35] bg-[#16191E] px-4 sm:px-8 py-3 text-xs flex items-center justify-between">
+        <Link to="/" className="flex items-center gap-2 hover:opacity-90">
+          <span className="w-2 h-2 rounded-full bg-[#2EA069]" />
+          <span className="font-semibold text-[#E1E4EA]">JARVIS</span>
+          <span className="text-[#828997]">/ System Capabilities</span>
+        </Link>
+        <Link to="/app/computer" className="text-[#D97736] hover:underline font-mono text-[11px]">
+          Launch Console →
+        </Link>
       </div>
 
-      {/* Feature Categories Grid */}
-      <div className="space-y-12">
-        {FEATURE_CATEGORIES.map((cat) => {
-          const Icon = cat.icon
-          return (
-            <div
-              key={cat.id}
-              className={`p-6 sm:p-8 rounded-3xl glass border ${cat.borderColor} space-y-6 relative overflow-hidden`}
-            >
-              {/* Top Category Title */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-jarvis-border/40 pb-5">
-                <div className="flex items-center gap-3.5">
-                  <div className="w-12 h-12 rounded-2xl bg-jarvis-surface flex items-center justify-center border border-jarvis-border/60">
-                    <Icon className={cat.color} size={24} />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-bold text-white">{cat.title}</h2>
-                    <p className="text-xs sm:text-sm text-jarvis-muted mt-0.5">{cat.subtitle}</p>
-                  </div>
-                </div>
+      <div className="max-w-5xl mx-auto px-4 sm:px-8 pt-10 space-y-16">
+        {/* Title & Introduction */}
+        <div className="space-y-4 max-w-3xl">
+          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded bg-[#16191E] border border-[#262B35] text-xs font-mono text-[#2EA069]">
+            <ShieldCheck size={14} />
+            <span>Architecture & Safety Verification</span>
+          </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-mono px-2.5 py-1 rounded-lg bg-jarvis-surface text-jarvis-light border border-jarvis-border/40">
-                    Deterministic v0.2.0
-                  </span>
-                </div>
-              </div>
+          <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-[#E1E4EA] font-sans">
+            How Jarvis Keeps You in Control
+          </h1>
 
-              {/* 4 Feature Items */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {cat.features.map((feat) => (
-                  <div
-                    key={feat.name}
-                    className="p-5 rounded-2xl bg-jarvis-surface/40 hover:bg-jarvis-surface/70 border border-jarvis-border/40 transition-all space-y-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 size={16} className={cat.color} />
-                      <h3 className="text-sm font-bold text-white">{feat.name}</h3>
-                    </div>
-                    <p className="text-xs text-jarvis-muted leading-relaxed pl-6">
-                      {feat.description}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Bottom CTA */}
-      <div className="p-8 rounded-2xl bg-gradient-to-r from-blue-900/30 via-indigo-950/40 to-jarvis-darker border border-blue-500/30 flex flex-col sm:flex-row items-center justify-between gap-6 text-center sm:text-left">
-        <div>
-          <h3 className="text-lg font-bold text-white">Experience the full capability stack live.</h3>
-          <p className="text-xs text-jarvis-muted mt-1">
-            Launch the interactive JARVIS application with zero installation required.
+          <p className="text-sm sm:text-base text-[#828997] leading-relaxed">
+            Granting an autonomous agent access to your keyboard and screen requires uncompromising architectural safeguards.
+            Here is the complete overview of how permissions, hardware isolation, and verified execution protect your machine.
           </p>
         </div>
-        <Link
-          to="/app"
-          className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg shadow-blue-500/25 flex items-center gap-2 whitespace-nowrap"
-        >
-          <span>Launch JARVIS App</span>
-          <ArrowRight size={14} />
-        </Link>
+
+        {/* Pillars */}
+        <div className="space-y-12">
+          {CAPABILITY_PILLARS.map((pillar) => {
+            const Icon = pillar.icon
+            return (
+              <section
+                key={pillar.id}
+                className="border border-[#262B35] bg-[#16191E] rounded p-6 sm:p-8 space-y-6"
+              >
+                <div className="flex items-start gap-4">
+                  <div
+                    className="p-2.5 rounded bg-[#0E1013] border border-[#262B35] shrink-0"
+                    style={{ color: pillar.accent }}
+                  >
+                    <Icon size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-base sm:text-lg font-semibold text-[#E1E4EA] font-sans">
+                      {pillar.title}
+                    </h2>
+                    <p className="text-xs sm:text-sm text-[#828997] pt-0.5">
+                      {pillar.tagline}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                  {pillar.items.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="p-4 rounded bg-[#0E1013] border border-[#262B35] space-y-2 text-xs"
+                    >
+                      <h3 className="font-semibold text-[#E1E4EA] font-sans">
+                        {item.name}
+                      </h3>
+                      <p className="text-[#828997] leading-relaxed text-[11px]">
+                        {item.desc}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )
+          })}
+        </div>
+
+        {/* Bottom CTA */}
+        <div className="border border-[#262B35] bg-[#16191E] rounded p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-[#E1E4EA] font-sans">
+              Ready to verify it on your computer?
+            </h3>
+            <p className="text-xs text-[#828997] pt-0.5">
+              Launch the local agent client and connect to your private session.
+            </p>
+          </div>
+
+          <Link
+            to="/app/computer"
+            className="px-5 py-2 rounded bg-[#D97736] hover:bg-[#D97736]/90 text-[#0E1013] font-medium text-xs flex items-center gap-2 transition-colors shrink-0"
+          >
+            <span>Launch Computer Control</span>
+            <ArrowRight size={14} />
+          </Link>
+        </div>
       </div>
     </div>
   )
